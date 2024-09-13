@@ -1,0 +1,140 @@
+<meta name="viewport" content='width=device-width' http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+<script>
+  function do_fetch(pathname, params=null, kws=null) {
+    var origin = window.location.origin;
+    // https://developer.mozilla.org/zh-CN/docs/Web/API/URL
+    if (origin.startsWith('file')) {
+      return;
+    }
+    var url = new URL(pathname, origin);
+    if (params == null) {
+      params = [];
+    }
+    for (let i in params) {
+      var k = params[i];
+      // https://developer.mozilla.org/zh-CN/docs/Web/API/Document/getElementById
+      var v = document.getElementById(k).value;
+      // https://code-boxx.com/javascript-fetch-get-query-params/
+      url.searchParams.append(k, v);
+    }
+    if (kws == null) {
+      kws = {}
+    }
+    for (let k in kws) {
+      url.searchParams.append(k, kws[k]);
+    }
+    return fetch(url);
+  }
+
+  function unload() {
+    do_fetch('/unload', ['previous_extruder'])
+  }
+  function load() {
+    do_fetch('/load', ['next_extruder'])
+  }
+  function stop() {
+    do_fetch('/stop', ['servo1_init', 'servo_power', 'previous_extruder', 'next_extruder'])
+  }
+  function test_forward() {
+    do_fetch('/test_forward', ['next_extruder'])
+  }
+  function test_backward() {
+    do_fetch('/test_backward', ['previous_extruder'])
+  }
+  function get_config() {
+    do_fetch('/get_config')
+      .then((response) => response.json())
+      .then((data) => {
+        for (let k in data) {
+          var e = document.getElementById(k)
+          if (e) {
+            e.value = data[k];
+            // e.setAttribute('value', data[k]);
+          }
+        }
+      });
+  }
+  function put_config() {
+    do_fetch('/put_config', ['bambu_mqtt_broker', 'bambu_mqtt_password', 'bambu_device_serial', 'servo1_init', 'servo_power', 'previous_extruder', 'next_extruder'])
+  }
+  function wifi_begin() {
+    do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])
+  }
+  function get_status() {
+    do_fetch('/get_status')
+      .then((response) => response.json())
+      .then((data) => {
+        for (let k in data) {
+          var e = document.getElementById(k)
+          if (e) {
+            e.value = data[k];
+          }
+        }
+      })
+  }
+  function get_local_ip() {
+    do_fetch('/get_local_ip')
+      .then((response) => response.json())
+      .then((data) => {
+        var e = document.getElementById("local_ip");
+        e.href = "http://" + data["local_ip"];
+        e.text = data["local_ip"];
+      })
+  }
+  function on_load() {
+    get_config();
+  }
+  window.addEventListener('load', on_load);
+</script>
+<script>
+  var gateway = `ws://${window.location.hostname}/ws`;
+  var websocket;
+  function initWebSocket() {
+    console.log('Trying to open a WebSocket connection...');
+    websocket = new WebSocket(gateway);
+    websocket.onopen    = onOpen;
+    websocket.onclose   = onClose;
+    websocket.onmessage = onMessage; // <-- add this line
+  }
+  function onOpen(event) {
+    console.log('Connection opened');
+  }
+ 
+  function onClose(event) {
+    console.log('Connection closed');
+    setTimeout(initWebSocket, 2000);
+  }
+  function onMessage(event) {
+    console.log('On message:');
+    console.log(event.data);
+    // document.getElementById('state').innerHTML = state;
+  }
+
+  window.addEventListener('load', onLoad);
+
+  function onLoad(event) {
+    initWebSocket();
+  }
+</script>
+<button onmouseup=get_config()>0. 获取配置信息</button> <br>
+WiFi名称：<input id="WiFi_ssid"> <br>
+WiFi密码：<input id="WiFi_passphrase"> <br>
+<button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>
+<button onmouseup=get_local_ip()>2. 获取 ip</button> <br>
+3. 跳转到：<a id="local_ip"></a> <br>
+servo1_init: <input type='number' id='servo1_init' value=90> <br>
+servo_power: <input type='number' id='servo_power' value=30> <br>
+打印机ip地址：<input id="bambu_mqtt_broker"> <br>
+打印机访问码：<input id="bambu_mqtt_password"> <br>
+打印机序列号：<input id="bambu_device_serial"> <br>
+有待退料管道：<input type='number' id='previous_extruder' value=0>
+有待进料管道：<input type='number' id='next_extruder' value=0> <br>
+<button onmouseup=put_config()>4. 上传配置信息</button> <br>
+
+<button onmouseup=unload()>unload</button>
+<button onmouseup=load()>load</button>
+<button onmouseup=stop()>stop</button> <br>
+<button onmouseup=fetch('/resume')>resume</button>
+<button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>
+<button onmouseup=test_forward()>test_forward</button>
+<button onmouseup=test_backward()>test_backward</button>
