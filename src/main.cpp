@@ -399,6 +399,9 @@ Config s_config;
 void get_config(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("application/json");
   serializeJson(s_config.m_data, *response);
+  if (bambu_client.connected()) {
+    bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+  }
   request->send(response);
 }
 
