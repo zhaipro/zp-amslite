@@ -2,7 +2,7 @@
 import re
 
 
-with open('index.html', encoding='utf-8') as fp:
+with open('data/index.html', encoding='utf-8') as fp:
     lastrow = None
     for line in fp:
         if line.strip().startswith('//'):

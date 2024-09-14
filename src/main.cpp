@@ -208,18 +208,6 @@ void homepage(AsyncWebServerRequest* request) {
   function wifi_begin() {\n\
     do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])\n\
   }\n\
-  function get_status() {\n\
-    do_fetch('/get_status')\n\
-      .then((response) => response.json())\n\
-      .then((data) => {\n\
-        for (let k in data) {\n\
-          var e = document.getElementById(k)\n\
-          if (e) {\n\
-            e.value = data[k];\n\
-          }\n\
-        }\n\
-      })\n\
-  }\n\
   function get_local_ip() {\n\
     do_fetch('/get_local_ip')\n\
       .then((response) => response.json())\n\
@@ -250,12 +238,13 @@ void homepage(AsyncWebServerRequest* request) {
 <div style='width:400px;float:left;'>\n\
 \n\
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>\n\
-<form action='/put_config' target='stop'>\n\
 WiFi名称：<input name='WiFi_ssid'> <br>\n\
 WiFi密码：<input name='WiFi_passphrase'> <br>\n\
 <button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>\n\
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>\n\
 3. 跳转到：<a id='local_ip'></a> <br>\n\
+--------------------------------------------------\n\
+<form action='/put_config' target='stop'>\n\
 4. 请选择联机模式: \n\
 <select name='mode' onchange=mode_change()>\n\
   <option value='WAN'>广域网模式</option>\n\

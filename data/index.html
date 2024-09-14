@@ -92,12 +92,13 @@
 <div style="width:400px;float:left;">
 
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>
-<form action="/put_config" target="stop">
 WiFi名称：<input name="WiFi_ssid"> <br>
 WiFi密码：<input name="WiFi_passphrase"> <br>
 <button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>
 3. 跳转到：<a id="local_ip"></a> <br>
+--------------------------------------------------
+<form action="/put_config" target="stop">
 4. 请选择联机模式: 
 <select name="mode" onchange=mode_change()>
   <option value="WAN">广域网模式</option>
