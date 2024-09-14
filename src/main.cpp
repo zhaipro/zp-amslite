@@ -8,15 +8,13 @@
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
 #include <LittleFS.h>
+#include <HTTPClient.h>
+#include <arduino_base64.hpp>
 
 #include "setups.h"
 
 // 开启调试模式，esp32 将不会连接拓竹
 // #define __DEBUG__
-
-// 设置您的 WiFi 接入信息
-const char* bambu_mqtt_id = "mqttx_c59bbf21";
-const char* bambu_mqtt_user = "bblp";
 
 // 拓竹指令
 // 执行 Unload 指令，打印机将开始自动加热热端，并切断线材。
@@ -150,7 +148,12 @@ public:
 AMSLite ams_lite1;
 
 void homepage(AsyncWebServerRequest* request) {
-  const char *html = "<meta name='viewport' content='width=device-width' http-equiv='Content-Type' content='text/html;charset=utf-8'/>\n\
+  const char *html = "<!DOCTYPE html>\n\
+<html>\n\
+<meta name='viewport' content='width=device-width;text/html;charset=utf-8' http-equiv='Content-Type' />\n\
+<style>\n\
+  div.hidden {display:none;}\n\
+  </style>\n\
 <script>\n\
   function do_fetch(pathname, params=null, kws=null) {\n\
     var origin = window.location.origin;\n\
@@ -195,15 +198,12 @@ void homepage(AsyncWebServerRequest* request) {
       .then((response) => response.json())\n\
       .then((data) => {\n\
         for (let k in data) {\n\
-          var e = document.getElementById(k)\n\
+          var e = document.getElementsByName(k)[0];\n\
           if (e) {\n\
             e.value = data[k];\n\
           }\n\
         }\n\
       });\n\
-  }\n\
-  function put_config() {\n\
-    do_fetch('/put_config', ['bambu_mqtt_broker', 'bambu_mqtt_password', 'bambu_device_serial', 'servo1_init', 'servo_power', 'previous_extruder', 'next_extruder'])\n\
   }\n\
   function wifi_begin() {\n\
     do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])\n\
@@ -263,28 +263,56 @@ void homepage(AsyncWebServerRequest* request) {
     initWebSocket();\n\
   }\n\
 </script>\n\
+<script>\n\
+  function mode_change() {\n\
+    var mode = document.getElementById('mode').value;\n\
+    if (mode == 'WAN_mode') {\n\
+      document.getElementById('LAN_mode').setAttribute('class', 'hidden');\n\
+      document.getElementById('WAN_mode').setAttribute('class', '');\n\
+    } else if (mode == 'LAN_mode'){\n\
+      document.getElementById('LAN_mode').setAttribute('class', '');\n\
+      document.getElementById('WAN_mode').setAttribute('class', 'hidden');\n\
+    }\n\
+  }\n\
+</script>\n\
+\n\
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>\n\
-WiFi名称：<input id='WiFi_ssid'> <br>\n\
-WiFi密码：<input id='WiFi_passphrase'> <br>\n\
+<form action='/put_config' target='stop'>\n\
+WiFi名称：<input name='WiFi_ssid'> <br>\n\
+WiFi密码：<input name='WiFi_passphrase'> <br>\n\
 <button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>\n\
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>\n\
 3. 跳转到：<a id='local_ip'></a> <br>\n\
-servo1_init: <input type='number' id='servo1_init' value=90> <br>\n\
-servo_power: <input type='number' id='servo_power' value=30> <br>\n\
-打印机ip地址：<input id='bambu_mqtt_broker'> <br>\n\
-打印机访问码：<input id='bambu_mqtt_password'> <br>\n\
-打印机序列号：<input id='bambu_device_serial'> <br>\n\
-有待退料管道：<input type='number' id='previous_extruder' value=0>\n\
-有待进料管道：<input type='number' id='next_extruder' value=0> <br>\n\
-<button onmouseup=put_config()>4. 上传配置信息</button> <br>\n\
-\n\
+4. 请选择联机模式: \n\
+<select name='mode' id='mode' onchange=mode_change()>\n\
+  <option value='WAN'>广域网模式</option>\n\
+  <option value='LAN'>局域网模式</option>\n\
+</select>\n\
+<br>\n\
+<div id='LAN_mode' class='hidden'>\n\
+  打印机ip地址：<input name='bambu_mqtt_broker'> <br>\n\
+  打印机访问码：<input name='bambu_mqtt_password'> <br>\n\
+</div>\n\
+<div id='WAN_mode'>\n\
+  手机号码：<input name='phone_number'> <br>\n\
+  密码：<input name='password'> <br>\n\
+</div>\n\
+打印机序列号：<input name='bambu_device_serial'> <br>\n\
+servo1_init: <input type='number' name='servo1_init' value=90> <br>\n\
+servo_power: <input type='number' name='servo_power' value=30> <br>\n\
+有待退料管道：<input type='number' name='previous_extruder' value=0>\n\
+有待进料管道：<input type='number' name='next_extruder' value=0> <br>\n\
+<input type='submit' value='5. 上传配置信息'>\n\
+</form>\n\
+<iframe  name='stop' style='display:none;'></iframe>\n\
 <button onmouseup=unload()>unload</button>\n\
 <button onmouseup=load()>load</button>\n\
 <button onmouseup=stop()>stop</button> <br>\n\
 <button onmouseup=fetch('/resume')>resume</button>\n\
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>\n\
 <button onmouseup=test_forward()>test_forward</button>\n\
-<button onmouseup=test_backward()>test_backward</button>";
+<button onmouseup=test_backward()>test_backward</button>\n\
+</html>";
 
   request->send(200, "text/html", html);
 }
@@ -304,6 +332,9 @@ public:
       File file = LittleFS.open("/config.json", "r");
       deserializeJson(m_data, file);
       file.close();
+    }
+    if (!m_data.containsKey("mode")) {
+      m_data["mode"] = "";
     }
     if (!m_data.containsKey("bambu_mqtt_broker")) {
       m_data["bambu_mqtt_broker"] = "";
@@ -349,6 +380,15 @@ void get_config(AsyncWebServerRequest *request) {
 }
 
 void put_config(AsyncWebServerRequest *request) {
+  if (request->hasParam("mode")) {
+    s_config.m_data["mode"] = request->getParam("mode")->value();
+  }
+  if (request->hasParam("phone_number")) {
+    s_config.m_data["phone_number"] = request->getParam("phone_number")->value();
+  }
+  if (request->hasParam("password")) {
+    s_config.m_data["password"] = request->getParam("password")->value();
+  }
   if (request->hasParam("bambu_mqtt_broker")) {
     s_config.m_data["bambu_mqtt_broker"] = request->getParam("bambu_mqtt_broker")->value();
   }
@@ -622,7 +662,6 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
 void bambu_setup() {
   // https://pubsubclient.knolleary.net/
   wifi_client.setInsecure();
-  bambu_client.setServer(s_config.m_data["bambu_mqtt_broker"].as<const char*>(), 8883);
   bambu_client.setCallback(bambu_callback);
   bambu_client.setBufferSize(4096);   // 其默认值 256 太小啦
 }
@@ -671,14 +710,70 @@ void setup() {
 void loop() {
 #ifndef __DEBUG__
   if (!bambu_client.connected()) {
-    if (bambu_client.connect(bambu_mqtt_id, bambu_mqtt_user, s_config.m_data["bambu_mqtt_password"].as<const char*>())) {
-      Serial.println("Connecting to bambu .. connected!");
-      bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
-      bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
-    } else {
-      Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
-      // ws.printfAll("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
-      delay(1000);
+    if (s_config.m_data["mode"] == "WAN") {
+      HTTPClient http;
+      JsonDocument data;
+      char buffer[256];
+      http.begin("https://api.bambulab.cn/v1/user-service/user/login");
+      http.addHeader("Content-Type", "application/json");
+      data["account"] = s_config.m_data["phone_number"].as<String>();
+      data["password"] = s_config.m_data["password"].as<String>();
+      serializeJson(data, buffer, 256);
+      Serial.printf("[HTTP] POST: %s\n", buffer);
+      int code = http.POST(buffer);
+      if (code == HTTP_CODE_OK) {
+        deserializeJson(data, http.getString());
+        s_config.m_data["access_token"] = data["accessToken"].as<String>();
+
+        
+        const char* jwt = data["accessToken"].as<const char*>();
+        
+        const char* sep = ".";
+        char* encodedHeader = strtok((char*)jwt, sep);
+        char* encodedPayload = strtok(NULL, sep);
+        char* encodedSignature = strtok(NULL, sep);
+
+        uint8_t payload[base64::decodeLength(encodedPayload)];
+        base64::decode(encodedPayload, payload);
+
+        deserializeJson(data, payload);
+        // Serial.print("payload: ");
+        // Serial.println(payload);
+        
+        s_config.m_data["username"] = data["username"].as<String>();
+        Serial.print("username: ");
+        Serial.println(data["username"].as<const char*>());
+        s_config.save();
+        // bambu_mqtt_broker', 'bambu_mqtt_password
+
+        const char* bambu_mqtt_id = "mqttx_c59bbf21";
+        bambu_client.setServer("cn.mqtt.bambulab.com", 8883);
+        if (bambu_client.connect(bambu_mqtt_id, s_config.m_data["username"].as<const char*>(), s_config.m_data["access_token"].as<const char*>())) {
+          Serial.println("Connecting to bambu .. connected!");
+          bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
+          bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+        } else {
+          Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
+          s_config.m_data["mode"] = "";
+          // ws.printfAll("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
+        }
+      } else {
+        Serial.printf("[HTTP] GET... code: %d\n%s", code, http.getString().c_str());
+        s_config.m_data["mode"] = "";
+      }
+    } else if (s_config.m_data["mode"] == "LAN") {
+      const char* bambu_mqtt_id = "mqttx_c59bbf21";
+      const char* bambu_mqtt_user = "bblp";
+      bambu_client.setServer(s_config.m_data["bambu_mqtt_broker"].as<const char*>(), 8883);
+      if (bambu_client.connect(bambu_mqtt_id, bambu_mqtt_user, s_config.m_data["bambu_mqtt_password"].as<const char*>())) {
+        Serial.println("Connecting to bambu .. connected!");
+        bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
+        bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+      } else {
+        Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
+        // ws.printfAll("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
+        delay(1000);
+      }
     }
   }
   bambu_client.loop();

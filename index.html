@@ -1,4 +1,9 @@
-<meta name="viewport" content='width=device-width' http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+<!DOCTYPE html>
+<html>
+<meta name="viewport" content='width=device-width;text/html;charset=utf-8' http-equiv="Content-Type" />
+<style>
+  div.hidden {display:none;}
+  </style>
 <script>
   function do_fetch(pathname, params=null, kws=null) {
     var origin = window.location.origin;
@@ -46,16 +51,13 @@
       .then((response) => response.json())
       .then((data) => {
         for (let k in data) {
-          var e = document.getElementById(k)
+          var e = document.getElementsByName(k)[0];
           if (e) {
             e.value = data[k];
             // e.setAttribute('value', data[k]);
           }
         }
       });
-  }
-  function put_config() {
-    do_fetch('/put_config', ['bambu_mqtt_broker', 'bambu_mqtt_password', 'bambu_device_serial', 'servo1_init', 'servo_power', 'previous_extruder', 'next_extruder'])
   }
   function wifi_begin() {
     do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])
@@ -107,7 +109,6 @@
   function onMessage(event) {
     console.log('On message:');
     console.log(event.data);
-    // document.getElementById('state').innerHTML = state;
   }
 
   window.addEventListener('load', onLoad);
@@ -116,21 +117,48 @@
     initWebSocket();
   }
 </script>
+<script>
+  function mode_change() {
+    var mode = document.getElementById('mode').value;
+    if (mode == "WAN_mode") {
+      document.getElementById('LAN_mode').setAttribute("class", "hidden");
+      document.getElementById('WAN_mode').setAttribute("class", "");
+    } else if (mode == "LAN_mode"){
+      document.getElementById('LAN_mode').setAttribute("class", "");
+      document.getElementById('WAN_mode').setAttribute("class", "hidden");
+    }
+  }
+</script>
+
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>
-WiFi名称：<input id="WiFi_ssid"> <br>
-WiFi密码：<input id="WiFi_passphrase"> <br>
+<form action="/put_config" target="stop">
+WiFi名称：<input name="WiFi_ssid"> <br>
+WiFi密码：<input name="WiFi_passphrase"> <br>
 <button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>
 3. 跳转到：<a id="local_ip"></a> <br>
-servo1_init: <input type='number' id='servo1_init' value=90> <br>
-servo_power: <input type='number' id='servo_power' value=30> <br>
-打印机ip地址：<input id="bambu_mqtt_broker"> <br>
-打印机访问码：<input id="bambu_mqtt_password"> <br>
-打印机序列号：<input id="bambu_device_serial"> <br>
-有待退料管道：<input type='number' id='previous_extruder' value=0>
-有待进料管道：<input type='number' id='next_extruder' value=0> <br>
-<button onmouseup=put_config()>4. 上传配置信息</button> <br>
-
+4. 请选择联机模式: 
+<select name="mode" id="mode" onchange=mode_change()>
+  <option value="WAN">广域网模式</option>
+  <option value="LAN">局域网模式</option>
+</select>
+<br>
+<div id="LAN_mode" class="hidden">
+  打印机ip地址：<input name="bambu_mqtt_broker"> <br>
+  打印机访问码：<input name="bambu_mqtt_password"> <br>
+</div>
+<div id="WAN_mode">
+  手机号码：<input name="phone_number"> <br>
+  密码：<input name="password"> <br>
+</div>
+打印机序列号：<input name="bambu_device_serial"> <br>
+servo1_init: <input type='number' name='servo1_init' value=90> <br>
+servo_power: <input type='number' name='servo_power' value=30> <br>
+有待退料管道：<input type='number' name='previous_extruder' value=0>
+有待进料管道：<input type='number' name='next_extruder' value=0> <br>
+<input type="submit" value="5. 上传配置信息">
+</form>
+<iframe  name="stop" style="display:none;"></iframe>
 <button onmouseup=unload()>unload</button>
 <button onmouseup=load()>load</button>
 <button onmouseup=stop()>stop</button> <br>
@@ -138,3 +166,4 @@ servo_power: <input type='number' id='servo_power' value=30> <br>
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>
 <button onmouseup=test_forward()>test_forward</button>
 <button onmouseup=test_backward()>test_backward</button>
+</html>
