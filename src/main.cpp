@@ -414,11 +414,14 @@ void get_config(AsyncWebServerRequest *request) {
 }
 
 void put_config(AsyncWebServerRequest *request) {
-  if (request->hasParam("mode")) {
-    s_config.m_data["mode"] = request->getParam("mode")->value();
+  AsyncWebParameter* param = nullptr;
+  param = request->getParam("mode");
+  if (param) {
+    s_config.m_data["mode"] = param->value();
   }
-  if (request->hasParam("phone_number")) {
-    s_config.m_data["phone_number"] = request->getParam("phone_number")->value();
+  param = request->getParam("phone_number");
+  if (param) {
+    s_config.m_data["phone_number"] = param->value();
   }
   if (request->hasParam("password")) {
     s_config.m_data["password"] = request->getParam("password")->value();
@@ -459,16 +462,6 @@ void get_local_ip(AsyncWebServerRequest *request) {
   JsonDocument data;
   if (WiFi.status() == WL_CONNECTED) {
     data["local_ip"] = WiFi.localIP().toString();
-  }
-  serializeJson(data, *response);
-  request->send(response);
-}
-
-void get_status(AsyncWebServerRequest *request) {
-  AsyncResponseStream *response = request->beginResponseStream("application/json");
-  JsonDocument data;
-  if (WiFi.status() == WL_CONNECTED) {
-    data["WiFi_local_ip"] = WiFi.localIP().toString();
   }
   serializeJson(data, *response);
   request->send(response);
@@ -576,9 +569,33 @@ void test_backward(AsyncWebServerRequest* request) {
 void wifi_setup() {
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("zhaipro-amslite", "zhaipro-amslite");
-  const char* ssid = s_config.m_data["WiFi_ssid"].as<const char*>();
-  const char* passphrase = s_config.m_data["WiFi_passphrase"].as<const char*>();
+  if (!s_config.m_data.containsKey("WiFi_ssid") || !s_config.m_data.containsKey("WiFi_passphrase")) {
+    return;
+  }
+  const String& ssid = s_config.m_data["WiFi_ssid"].as<String>();
+  const String& passphrase = s_config.m_data["WiFi_passphrase"].as<String>();
+  if (ssid.isEmpty() || passphrase.isEmpty()) {
+    return;
+  }
+  // 最终常亮表示成功，常灭表示失败
+  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.printf("Connecting to %s ", ssid.c_str());
   WiFi.begin(ssid, passphrase);
+  for (int i = 0; i < 7; i++) {
+    digitalWrite(LED_BUILTIN, HIGH);  // turn the LED off by making the voltage LOW
+    if (WiFi.status() == WL_CONNECTED) {
+      break;
+    }
+    delay(1000);                      // wait for a second
+    digitalWrite(LED_BUILTIN, LOW);   // turn the LED on (HIGH is the voltage level)
+    delay(1000);                      // wait for a second
+    Serial.print(".");
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(" connected");
+  } else {
+    Serial.println(" failed");
+  }
 }
 
 void wifi_begin(AsyncWebServerRequest* request) {
@@ -719,7 +736,6 @@ void wifi_server_setup() {
   server.on("/test_backward", test_backward);
   server.on("/put_config", put_config);
   server.on("/get_config", get_config);
-  server.on("/get_status", get_status);
   server.on("/get_local_ip", get_local_ip);
   server.on("/wifi_begin", wifi_begin);
   server.addHandler(&ws);
@@ -751,38 +767,14 @@ void setup() {
 
 void loop() {
 #ifndef __DEBUG__
-  if (!bambu_client.connected()) {
+  if (WiFi.status() == WL_CONNECTED && !bambu_client.connected()) {
     if (s_config.m_data["mode"] == "WAN") {
-      HTTPClient http;
-      JsonDocument data;
-      char buffer[256];
-      http.begin("https://api.bambulab.cn/v1/user-service/user/login");
-      http.addHeader("Content-Type", "application/json");
-      data["account"] = s_config.m_data["phone_number"].as<String>();
-      data["password"] = s_config.m_data["password"].as<String>();
-      serializeJson(data, buffer, 256);
-      Serial.printf("[HTTP] POST: %s\n", buffer);
-      int code = http.POST(buffer);
-      if (code == HTTP_CODE_OK) {
-        deserializeJson(data, http.getString());
-        s_config.m_data["access_token"] = data["accessToken"].as<String>();
-
-        const char* jwt = data["accessToken"].as<const char*>();
-        const char* sep = ".";
-        strtok((char*)jwt, sep);
-        char* encoded_payload = strtok(NULL, sep);
-        uint8_t payload[base64::decodeLength(encoded_payload)];
-        base64::decode(encoded_payload, payload);
-        deserializeJson(data, payload);
-        
-        s_config.m_data["username"] = data["username"].as<String>();
-        Serial.print("username: ");
-        Serial.println(data["username"].as<const char*>());
-        s_config.save();
-
-        const char* bambu_mqtt_id = "mqttx_c59bbf21";
+      const char* bambu_mqtt_id = "mqttx_c59bbf21";
+      const String& username = s_config.m_data["username"].as<String>();
+      const String& access_token = s_config.m_data["access_token"].as<String>();
+      if (!username.isEmpty() && !access_token.isEmpty()) {
         bambu_client.setServer("cn.mqtt.bambulab.com", 8883);
-        if (bambu_client.connect(bambu_mqtt_id, s_config.m_data["username"].as<const char*>(), s_config.m_data["access_token"].as<const char*>())) {
+        if (bambu_client.connect(bambu_mqtt_id, username.c_str(), access_token.c_str())) {
           Serial.println("Connecting to bambu .. connected!");
           bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
           bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
@@ -791,8 +783,37 @@ void loop() {
           s_config.m_data["mode"] = "";
         }
       } else {
-        Serial.printf("[HTTP] GET... code: %d\n%s", code, http.getString().c_str());
-        s_config.m_data["mode"] = "";
+        const String& phone_number = s_config.m_data["phone_number"].as<String>();
+        const String& password = s_config.m_data["password"].as<String>();
+        if (!phone_number.isEmpty() && !password.isEmpty()) {
+          HTTPClient http;
+          JsonDocument data;
+          char buffer[256];
+          http.begin("https://api.bambulab.cn/v1/user-service/user/login");
+          http.addHeader("Content-Type", "application/json");
+          data["account"] = phone_number;
+          data["password"] = password;
+          serializeJson(data, buffer, 256);
+          Serial.printf("[HTTP] POST: %s\n", buffer);
+          int code = http.POST(buffer);
+          if (code == HTTP_CODE_OK) {
+            deserializeJson(data, http.getString());
+            s_config.m_data["access_token"] = data["accessToken"].as<String>();
+            const char* jwt = data["accessToken"].as<const char*>();
+            const char* sep = ".";
+            strtok((char*)jwt, sep);
+            char* encoded_payload = strtok(NULL, sep);
+            uint8_t payload[base64::decodeLength(encoded_payload)];
+            base64::decode(encoded_payload, payload);
+            deserializeJson(data, payload);
+            s_config.m_data["username"] = data["username"].as<String>();
+            Serial.printf("username: %s\n", data["username"].as<const char*>());
+            s_config.save();
+          } else {
+            Serial.printf("[HTTP] GET... code: %d\n%s", code, http.getString().c_str());
+            s_config.m_data["mode"] = "";
+          }
+        }
       }
     } else if (s_config.m_data["mode"] == "LAN") {
       const char* bambu_mqtt_id = "mqttx_c59bbf21";

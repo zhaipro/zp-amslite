@@ -62,18 +62,6 @@
   function wifi_begin() {
     do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])
   }
-  function get_status() {
-    do_fetch('/get_status')
-      .then((response) => response.json())
-      .then((data) => {
-        for (let k in data) {
-          var e = document.getElementById(k)
-          if (e) {
-            e.value = data[k];
-          }
-        }
-      })
-  }
   function get_local_ip() {
     do_fetch('/get_local_ip')
       .then((response) => response.json())
