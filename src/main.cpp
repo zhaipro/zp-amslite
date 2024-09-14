@@ -153,7 +153,7 @@ void homepage(AsyncWebServerRequest* request) {
 <meta name='viewport' content='width=device-width;text/html;charset=utf-8' http-equiv='Content-Type' />\n\
 <style>\n\
   div.hidden {display:none;}\n\
-  </style>\n\
+</style>\n\
 <script>\n\
   function do_fetch(pathname, params=null, kws=null) {\n\
     var origin = window.location.origin;\n\
@@ -235,46 +235,19 @@ void homepage(AsyncWebServerRequest* request) {
   window.addEventListener('load', on_load);\n\
 </script>\n\
 <script>\n\
-  var gateway = `ws://${window.location.hostname}/ws`;\n\
-  var websocket;\n\
-  function initWebSocket() {\n\
-    console.log('Trying to open a WebSocket connection...');\n\
-    websocket = new WebSocket(gateway);\n\
-    websocket.onopen    = onOpen;\n\
-    websocket.onclose   = onClose;\n\
-    websocket.onmessage = onMessage; // <-- add this line\n\
-  }\n\
-  function onOpen(event) {\n\
-    console.log('Connection opened');\n\
-  }\n\
- \n\
-  function onClose(event) {\n\
-    console.log('Connection closed');\n\
-    setTimeout(initWebSocket, 2000);\n\
-  }\n\
-  function onMessage(event) {\n\
-    console.log('On message:');\n\
-    console.log(event.data);\n\
-  }\n\
-\n\
-  window.addEventListener('load', onLoad);\n\
-\n\
-  function onLoad(event) {\n\
-    initWebSocket();\n\
-  }\n\
-</script>\n\
-<script>\n\
   function mode_change() {\n\
-    var mode = document.getElementById('mode').value;\n\
-    if (mode == 'WAN_mode') {\n\
-      document.getElementById('LAN_mode').setAttribute('class', 'hidden');\n\
-      document.getElementById('WAN_mode').setAttribute('class', '');\n\
-    } else if (mode == 'LAN_mode'){\n\
-      document.getElementById('LAN_mode').setAttribute('class', '');\n\
-      document.getElementById('WAN_mode').setAttribute('class', 'hidden');\n\
+    var mode = document.getElementsByName('mode')[0].value;\n\
+    if (mode == 'WAN') {\n\
+      document.getElementById('LAN').setAttribute('class', 'hidden');\n\
+      document.getElementById('WAN').setAttribute('class', '');\n\
+    } else if (mode == 'LAN'){\n\
+      document.getElementById('LAN').setAttribute('class', '');\n\
+      document.getElementById('WAN').setAttribute('class', 'hidden');\n\
     }\n\
   }\n\
 </script>\n\
+\n\
+<div style='width:400px;float:left;'>\n\
 \n\
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>\n\
 <form action='/put_config' target='stop'>\n\
@@ -284,23 +257,23 @@ WiFi密码：<input name='WiFi_passphrase'> <br>\n\
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>\n\
 3. 跳转到：<a id='local_ip'></a> <br>\n\
 4. 请选择联机模式: \n\
-<select name='mode' id='mode' onchange=mode_change()>\n\
+<select name='mode' onchange=mode_change()>\n\
   <option value='WAN'>广域网模式</option>\n\
   <option value='LAN'>局域网模式</option>\n\
 </select>\n\
 <br>\n\
-<div id='LAN_mode' class='hidden'>\n\
+<div id='LAN' class='hidden'>\n\
   打印机ip地址：<input name='bambu_mqtt_broker'> <br>\n\
   打印机访问码：<input name='bambu_mqtt_password'> <br>\n\
 </div>\n\
-<div id='WAN_mode'>\n\
+<div id='WAN'>\n\
   手机号码：<input name='phone_number'> <br>\n\
   密码：<input name='password'> <br>\n\
 </div>\n\
 打印机序列号：<input name='bambu_device_serial'> <br>\n\
 servo1_init: <input type='number' name='servo1_init' value=90> <br>\n\
 servo_power: <input type='number' name='servo_power' value=30> <br>\n\
-有待退料管道：<input type='number' name='previous_extruder' value=0>\n\
+有待退料管道：<input type='number' name='previous_extruder' value=0> <br>\n\
 有待进料管道：<input type='number' name='next_extruder' value=0> <br>\n\
 <input type='submit' value='5. 上传配置信息'>\n\
 </form>\n\
@@ -312,6 +285,67 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>\n\
 <button onmouseup=test_forward()>test_forward</button>\n\
 <button onmouseup=test_backward()>test_backward</button>\n\
+</div>\n\
+\n\
+<div style='float:left;'>\n\
+  <table>\n\
+    <tr>\n\
+      <td>sequence_id:</td>\n\
+      <td id='sequence_id'>unknown</td>\n\
+    </tr>\n\
+    <tr>\n\
+      <td>hw_switch_state:</td>\n\
+      <td id='hw_switch_state'>unknown</td>\n\
+    </tr>\n\
+    <tr>\n\
+      <td>ams_status: </td>\n\
+      <td id='ams_status'>unknown</td>\n\
+    </tr>\n\
+    <tr>\n\
+      <td>print_error: </td>\n\
+      <td id='print_error'>unknown</td>\n\
+    </tr>\n\
+    <tr>\n\
+      <td>gcode_state: </td>\n\
+      <td id='gcode_state'>unknown</td>\n\
+    </tr>\n\
+    <tr>\n\
+      <td>mc_percent: </td>\n\
+      <td id='mc_percent'>unknown</td>\n\
+    </tr>\n\
+  </table>\n\
+</div>\n\
+<script>\n\
+  var gateway = `ws://${window.location.hostname}/ws`;\n\
+  var websocket;\n\
+  function initWebSocket() {\n\
+    console.log('Trying to open a WebSocket connection...');\n\
+    websocket = new WebSocket(gateway);\n\
+    websocket.onopen    = onOpen;\n\
+    websocket.onclose   = onClose;\n\
+    websocket.onmessage = onMessage;\n\
+  }\n\
+  function onOpen(event) {\n\
+    console.log('Connection opened');\n\
+  }\n\
+  function onClose(event) {\n\
+    console.log('Connection closed');\n\
+  }\n\
+  function onMessage(event) {\n\
+    console.log('On message:');\n\
+    console.log(event.data);\n\
+    const data = JSON.parse(event.data);\n\
+    for (let k in data) {\n\
+      document.getElementById(k).innerText = data[k];\n\
+    }\n\
+  }\n\
+\n\
+  window.addEventListener('load', onLoad);\n\
+\n\
+  function onLoad(event) {\n\
+    initWebSocket();\n\
+  }\n\
+</script>\n\
 </html>";
 
   request->send(200, "text/html", html);
@@ -477,13 +511,9 @@ void oled_update() {
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println(WiFi.localIP());
-  display.printf("ams_status: %d\n", ams_status);
-
   display.printf("zp_state: %d\n", zp_state);
-  display.printf("hw_switch_state: %d\n", hw_switch_state);
   display.printf("previous_extruder: %d\n", previous_extruder);
   display.printf("next_extruder: %d\n", next_extruder);
-  display.printf("print_error: %d\n", print_error);
 
   display.display();      // Show initial text
 }
@@ -569,17 +599,21 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
     // 收到未知信息，直接不理睬
     return;
   }
-  ws.textAll(payload, length);
+
+  JsonDocument _data;
+
   const char* sequence_id = data["print"]["sequence_id"].as<const char*>();
-  ws.textAll(sequence_id);
   if (data["print"].containsKey("hw_switch_state")) {
     hw_switch_state = data["print"]["hw_switch_state"].as<int>();
+    _data["hw_switch_state"] = hw_switch_state;
   }
   if (data["print"].containsKey("gcode_state")) {
     gcode_state = data["print"]["gcode_state"].as<String>();
+    _data["gcode_state"] = gcode_state;
   }
   if (data["print"].containsKey("mc_percent")) {
     mc_percent = data["print"]["mc_percent"].as<int>();
+    _data["mc_percent"] = mc_percent;
   }
   // Serial.printf("bambu sequence_id: \"%s\" gcode_state: %s mc_percent: %d\n", sequence_id, gcode_state, mc_percent);
   if (gcode_state != "PAUSE") {
@@ -606,6 +640,7 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
   }
   if (data["print"].containsKey("ams_status")) {
     ams_status = data["print"]["ams_status"].as<int>();
+    _data["ams_status"] = ams_status;
     Serial.printf("bambu sequence_id: \"%s\" ams_status: %d\n", sequence_id, ams_status);
 
     if (ams_status == 260) {
@@ -645,6 +680,7 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
   
   if (data["print"].containsKey("print_error")) {
     print_error = data["print"]["print_error"].as<int>();
+    _data["print_error"] = print_error;
     Serial.printf("bambu sequence_id: \"%s\" print_error: %d\n", sequence_id, print_error);
     // 318750726 0b1001011111111 11000000 00000110 请推入耗材？
     // 318734342 0b1001011111111 11001110 00100110 没检测到进料？
@@ -655,6 +691,12 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
       // 弹窗询问：“是否完成换料？”，我们点击完成
       bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_done);
     }
+  }
+  if (_data.size()) {
+    char buffer[256];
+    _data["sequence_id"] = sequence_id;
+    serializeJson(_data, buffer, sizeof(buffer));
+    ws.textAll(buffer);
   }
   oled_update();
 }
@@ -725,26 +767,18 @@ void loop() {
         deserializeJson(data, http.getString());
         s_config.m_data["access_token"] = data["accessToken"].as<String>();
 
-        
         const char* jwt = data["accessToken"].as<const char*>();
-        
         const char* sep = ".";
-        char* encodedHeader = strtok((char*)jwt, sep);
-        char* encodedPayload = strtok(NULL, sep);
-        char* encodedSignature = strtok(NULL, sep);
-
-        uint8_t payload[base64::decodeLength(encodedPayload)];
-        base64::decode(encodedPayload, payload);
-
+        strtok((char*)jwt, sep);
+        char* encoded_payload = strtok(NULL, sep);
+        uint8_t payload[base64::decodeLength(encoded_payload)];
+        base64::decode(encoded_payload, payload);
         deserializeJson(data, payload);
-        // Serial.print("payload: ");
-        // Serial.println(payload);
         
         s_config.m_data["username"] = data["username"].as<String>();
         Serial.print("username: ");
         Serial.println(data["username"].as<const char*>());
         s_config.save();
-        // bambu_mqtt_broker', 'bambu_mqtt_password
 
         const char* bambu_mqtt_id = "mqttx_c59bbf21";
         bambu_client.setServer("cn.mqtt.bambulab.com", 8883);
@@ -755,7 +789,6 @@ void loop() {
         } else {
           Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
           s_config.m_data["mode"] = "";
-          // ws.printfAll("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
         }
       } else {
         Serial.printf("[HTTP] GET... code: %d\n%s", code, http.getString().c_str());
@@ -771,7 +804,6 @@ void loop() {
         bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
       } else {
         Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
-        // ws.printfAll("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
         delay(1000);
       }
     }

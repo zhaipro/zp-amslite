@@ -3,7 +3,7 @@
 <meta name="viewport" content='width=device-width;text/html;charset=utf-8' http-equiv="Content-Type" />
 <style>
   div.hidden {display:none;}
-  </style>
+</style>
 <script>
   function do_fetch(pathname, params=null, kws=null) {
     var origin = window.location.origin;
@@ -89,46 +89,19 @@
   window.addEventListener('load', on_load);
 </script>
 <script>
-  var gateway = `ws://${window.location.hostname}/ws`;
-  var websocket;
-  function initWebSocket() {
-    console.log('Trying to open a WebSocket connection...');
-    websocket = new WebSocket(gateway);
-    websocket.onopen    = onOpen;
-    websocket.onclose   = onClose;
-    websocket.onmessage = onMessage; // <-- add this line
-  }
-  function onOpen(event) {
-    console.log('Connection opened');
-  }
- 
-  function onClose(event) {
-    console.log('Connection closed');
-    setTimeout(initWebSocket, 2000);
-  }
-  function onMessage(event) {
-    console.log('On message:');
-    console.log(event.data);
-  }
-
-  window.addEventListener('load', onLoad);
-
-  function onLoad(event) {
-    initWebSocket();
-  }
-</script>
-<script>
   function mode_change() {
-    var mode = document.getElementById('mode').value;
-    if (mode == "WAN_mode") {
-      document.getElementById('LAN_mode').setAttribute("class", "hidden");
-      document.getElementById('WAN_mode').setAttribute("class", "");
-    } else if (mode == "LAN_mode"){
-      document.getElementById('LAN_mode').setAttribute("class", "");
-      document.getElementById('WAN_mode').setAttribute("class", "hidden");
+    var mode = document.getElementsByName('mode')[0].value;
+    if (mode == "WAN") {
+      document.getElementById('LAN').setAttribute("class", "hidden");
+      document.getElementById('WAN').setAttribute("class", "");
+    } else if (mode == "LAN"){
+      document.getElementById('LAN').setAttribute("class", "");
+      document.getElementById('WAN').setAttribute("class", "hidden");
     }
   }
 </script>
+
+<div style="width:400px;float:left;">
 
 <button onmouseup=get_config()>0. 获取配置信息</button> <br>
 <form action="/put_config" target="stop">
@@ -138,23 +111,23 @@ WiFi密码：<input name="WiFi_passphrase"> <br>
 <button onmouseup=get_local_ip()>2. 获取 ip</button> <br>
 3. 跳转到：<a id="local_ip"></a> <br>
 4. 请选择联机模式: 
-<select name="mode" id="mode" onchange=mode_change()>
+<select name="mode" onchange=mode_change()>
   <option value="WAN">广域网模式</option>
   <option value="LAN">局域网模式</option>
 </select>
 <br>
-<div id="LAN_mode" class="hidden">
+<div id="LAN" class="hidden">
   打印机ip地址：<input name="bambu_mqtt_broker"> <br>
   打印机访问码：<input name="bambu_mqtt_password"> <br>
 </div>
-<div id="WAN_mode">
+<div id="WAN">
   手机号码：<input name="phone_number"> <br>
   密码：<input name="password"> <br>
 </div>
 打印机序列号：<input name="bambu_device_serial"> <br>
 servo1_init: <input type='number' name='servo1_init' value=90> <br>
 servo_power: <input type='number' name='servo_power' value=30> <br>
-有待退料管道：<input type='number' name='previous_extruder' value=0>
+有待退料管道：<input type='number' name='previous_extruder' value=0> <br>
 有待进料管道：<input type='number' name='next_extruder' value=0> <br>
 <input type="submit" value="5. 上传配置信息">
 </form>
@@ -166,4 +139,65 @@ servo_power: <input type='number' name='servo_power' value=30> <br>
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>
 <button onmouseup=test_forward()>test_forward</button>
 <button onmouseup=test_backward()>test_backward</button>
+</div>
+
+<div style="float:left;">
+  <table>
+    <tr>
+      <td>sequence_id:</td>
+      <td id="sequence_id">unknown</td>
+    </tr>
+    <tr>
+      <td>hw_switch_state:</td>
+      <td id="hw_switch_state">unknown</td>
+    </tr>
+    <tr>
+      <td>ams_status: </td>
+      <td id="ams_status">unknown</td>
+    </tr>
+    <tr>
+      <td>print_error: </td>
+      <td id="print_error">unknown</td>
+    </tr>
+    <tr>
+      <td>gcode_state: </td>
+      <td id="gcode_state">unknown</td>
+    </tr>
+    <tr>
+      <td>mc_percent: </td>
+      <td id="mc_percent">unknown</td>
+    </tr>
+  </table>
+</div>
+<script>
+  var gateway = `ws://${window.location.hostname}/ws`;
+  var websocket;
+  function initWebSocket() {
+    console.log('Trying to open a WebSocket connection...');
+    websocket = new WebSocket(gateway);
+    websocket.onopen    = onOpen;
+    websocket.onclose   = onClose;
+    websocket.onmessage = onMessage;
+  }
+  function onOpen(event) {
+    console.log('Connection opened');
+  }
+  function onClose(event) {
+    console.log('Connection closed');
+  }
+  function onMessage(event) {
+    console.log('On message:');
+    console.log(event.data);
+    const data = JSON.parse(event.data);
+    for (let k in data) {
+      document.getElementById(k).innerText = data[k];
+    }
+  }
+
+  window.addEventListener('load', onLoad);
+
+  function onLoad(event) {
+    initWebSocket();
+  }
+</script>
 </html>
