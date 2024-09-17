@@ -4,6 +4,31 @@
 <style>
   div.hidden {display:none;}
 </style>
+<style>
+  .tooltip {
+    position: relative;
+    display: inline-block;
+    border-bottom: 1px dotted black;
+  }
+  
+  .tooltip .tooltiptext {
+    visibility: hidden;
+    width: 256px;
+    background-color: black;
+    color: #fff;
+    /* text-align: center; */
+    border-radius: 6px;
+    padding: 5px 10px;
+
+    /* 定位 */
+    position: absolute;
+    z-index: 1;
+  }
+  
+  .tooltip:hover .tooltiptext {
+    visibility: visible;
+  }
+</style>
 <script>
   function do_fetch(pathname, params=null, kws=null) {
     var origin = window.location.origin;
@@ -18,7 +43,11 @@
     for (let i in params) {
       var k = params[i];
       // https://developer.mozilla.org/zh-CN/docs/Web/API/Document/getElementById
-      var v = document.getElementById(k).value;
+      var e = document.getElementById(k);
+      if (e == null) {
+        e = document.getElementsByName(k)[0];
+      }
+      var v = e.value;
       // https://code-boxx.com/javascript-fetch-get-query-params/
       url.searchParams.append(k, v);
     }
@@ -137,11 +166,34 @@ servo_power: <input type='number' name='servo_power' value=30> <br>
       <td id="sequence_id">unknown</td>
     </tr>
     <tr>
-      <td>hw_switch_state:</td>
+      <td>hw_switch_state
+        <div class="tooltip">❔
+          <span class="tooltiptext">
+            料线检测<br>
+            1：正常<br>
+            0：无料
+          </span>
+        </div>
+        :
+      </td>
       <td id="hw_switch_state">unknown</td>
     </tr>
     <tr>
-      <td>ams_status: </td>
+      <td>ams_status
+        <div class="tooltip">❔
+          <span class="tooltiptext">
+            258：加热喷嘴<br>
+            259：剪断耗材丝<br>
+            260:退料最后提示回抽<br>
+            0：回抽完成<br>
+            261：提示插入线材<br>
+            262：插入成功，提示观察喷嘴<br>
+            263：确认之后挤出材料并冲刷<br>
+            768：进料完成<br>
+            1280：正在打印（不确定）
+          </span>
+        </div>:
+      </td>
       <td id="ams_status">unknown</td>
     </tr>
     <tr>

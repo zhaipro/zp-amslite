@@ -154,6 +154,31 @@ void homepage(AsyncWebServerRequest* request) {
 <style>\n\
   div.hidden {display:none;}\n\
 </style>\n\
+<style>\n\
+  .tooltip {\n\
+    position: relative;\n\
+    display: inline-block;\n\
+    border-bottom: 1px dotted black;\n\
+  }\n\
+  \n\
+  .tooltip .tooltiptext {\n\
+    visibility: hidden;\n\
+    width: 256px;\n\
+    background-color: black;\n\
+    color: #fff;\n\
+    /* text-align: center; */\n\
+    border-radius: 6px;\n\
+    padding: 5px 10px;\n\
+\n\
+    /* 定位 */\n\
+    position: absolute;\n\
+    z-index: 1;\n\
+  }\n\
+  \n\
+  .tooltip:hover .tooltiptext {\n\
+    visibility: visible;\n\
+  }\n\
+</style>\n\
 <script>\n\
   function do_fetch(pathname, params=null, kws=null) {\n\
     var origin = window.location.origin;\n\
@@ -166,7 +191,11 @@ void homepage(AsyncWebServerRequest* request) {
     }\n\
     for (let i in params) {\n\
       var k = params[i];\n\
-      var v = document.getElementById(k).value;\n\
+      var e = document.getElementById(k);\n\
+      if (e == null) {\n\
+        e = document.getElementsByName(k)[0];\n\
+      }\n\
+      var v = e.value;\n\
       url.searchParams.append(k, v);\n\
     }\n\
     if (kws == null) {\n\
@@ -283,11 +312,34 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
       <td id='sequence_id'>unknown</td>\n\
     </tr>\n\
     <tr>\n\
-      <td>hw_switch_state:</td>\n\
+      <td>hw_switch_state\n\
+        <div class='tooltip'>❔\n\
+          <span class='tooltiptext'>\n\
+            料线检测<br>\n\
+            1：正常<br>\n\
+            0：无料\n\
+          </span>\n\
+        </div>\n\
+        :\n\
+      </td>\n\
       <td id='hw_switch_state'>unknown</td>\n\
     </tr>\n\
     <tr>\n\
-      <td>ams_status: </td>\n\
+      <td>ams_status\n\
+        <div class='tooltip'>❔\n\
+          <span class='tooltiptext'>\n\
+            258：加热喷嘴<br>\n\
+            259：剪断耗材丝<br>\n\
+            260:退料最后提示回抽<br>\n\
+            0：回抽完成<br>\n\
+            261：提示插入线材<br>\n\
+            262：插入成功，提示观察喷嘴<br>\n\
+            263：确认之后挤出材料并冲刷<br>\n\
+            768：进料完成<br>\n\
+            1280：正在打印（不确定）\n\
+          </span>\n\
+        </div>:\n\
+      </td>\n\
       <td id='ams_status'>unknown</td>\n\
     </tr>\n\
     <tr>\n\
