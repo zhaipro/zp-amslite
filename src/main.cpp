@@ -677,7 +677,6 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
     mc_percent = data["print"]["mc_percent"].as<int>();
     _data["mc_percent"] = mc_percent;
   }
-  // Serial.printf("bambu sequence_id: \"%s\" gcode_state: %s mc_percent: %d\n", sequence_id, gcode_state, mc_percent);
   if (gcode_state != "PAUSE") {
     // 如果打印机不空闲，那么我必空闲
     zp_state = 0;
@@ -721,7 +720,8 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
         bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_resume);
       }
     } else if (ams_status == 0) {
-      // 完成退料？
+      // 完成退料，但还要继续拔出一段
+      delay(1000);
       ams_lite1.stop();
       if (zp_state == 1) {
         bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_load);
@@ -790,6 +790,7 @@ void wifi_server_setup() {
 
 void setup() {
   Serial.begin(115200);
+  // Serial.println(String(ESP.getEfuseMac(), HEX).c_str());
   // https://randomnerdtutorials.com/esp32-write-data-littlefs-arduino/
   //  You only need to format LittleFS the first time you run a
   //  test or else use the LITTLEFS plugin to create a partition 
@@ -825,7 +826,7 @@ void loop() {
           bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
           bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
         } else {
-          Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
+          Serial.printf("The bambu connection(WAN) failed!\nbambu_client.state() => %d\n", bambu_client.state());
           s_config.m_data.remove("username");
           s_config.m_data.remove("access_token");
         }
@@ -871,8 +872,8 @@ void loop() {
         bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
         bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
       } else {
-        Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
-        delay(1000);
+        Serial.printf("The bambu connection(LAN) failed!\nbambu_client.state() => %d\n", bambu_client.state());
+        s_config.m_data["mode"] = "";
       }
     }
   }
