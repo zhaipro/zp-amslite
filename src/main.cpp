@@ -637,6 +637,7 @@ void wifi_setup() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println(" connected");
+    Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
     Serial.println(" failed");
   }
@@ -814,17 +815,19 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED && !bambu_client.connected()) {
     if (s_config.m_data["mode"] == "WAN") {
       const char* bambu_mqtt_id = "mqttx_c59bbf21";
-      const String& username = s_config.m_data["username"].as<String>();
-      const String& access_token = s_config.m_data["access_token"].as<String>();
-      if (!username.isEmpty() && !access_token.isEmpty()) {
+      const char* username = s_config.m_data["username"].as<const char*>();
+      const char* access_token = s_config.m_data["access_token"].as<const char*>();
+      if (username && access_token) {
+        Serial.printf("bambu_client.connect(<id>, \"%s\", <token>)\n", username);
         bambu_client.setServer("cn.mqtt.bambulab.com", 8883);
-        if (bambu_client.connect(bambu_mqtt_id, username.c_str(), access_token.c_str())) {
+        if (bambu_client.connect(bambu_mqtt_id, username, access_token)) {
           Serial.println("Connecting to bambu .. connected!");
           bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
           bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
         } else {
           Serial.printf("The bambu connection failed!\nbambu_client.state() => %d\n", bambu_client.state());
-          s_config.m_data["mode"] = "";
+          s_config.m_data.remove("username");
+          s_config.m_data.remove("access_token");
         }
       } else {
         const String& phone_number = s_config.m_data["phone_number"].as<String>();
