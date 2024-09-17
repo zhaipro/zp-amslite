@@ -150,34 +150,14 @@ AMSLite ams_lite1;
 void homepage(AsyncWebServerRequest* request) {
   const char *html = "<!DOCTYPE html>\n\
 <html>\n\
-<meta name='viewport' content='width=device-width;text/html;charset=utf-8' http-equiv='Content-Type' />\n\
+  <head>\n\
+    <meta charset='utf-8'>\n\
+    <meta name='viewport' content='width=device-width;text/html;initial-scale=1' http-equiv='Content-Type' />\n\
+    <link href='https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.3/css/bootstrap.min.css' rel='stylesheet'>\n\
+    <script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js'></script>\n\
+  </head>\n\
 <style>\n\
   div.hidden {display:none;}\n\
-</style>\n\
-<style>\n\
-  .tooltip {\n\
-    position: relative;\n\
-    display: inline-block;\n\
-    border-bottom: 1px dotted black;\n\
-  }\n\
-  \n\
-  .tooltip .tooltiptext {\n\
-    visibility: hidden;\n\
-    width: 256px;\n\
-    background-color: black;\n\
-    color: #fff;\n\
-    /* text-align: center; */\n\
-    border-radius: 6px;\n\
-    padding: 5px 10px;\n\
-\n\
-    /* 定位 */\n\
-    position: absolute;\n\
-    z-index: 1;\n\
-  }\n\
-  \n\
-  .tooltip:hover .tooltiptext {\n\
-    visibility: visible;\n\
-  }\n\
 </style>\n\
 <script>\n\
   function do_fetch(pathname, params=null, kws=null) {\n\
@@ -302,7 +282,8 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
 <button onmouseup=fetch('/resume')>resume</button>\n\
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>\n\
 <button onmouseup=test_forward()>test_forward</button>\n\
-<button onmouseup=test_backward()>test_backward</button>\n\
+<button onmouseup=test_backward()>test_backward</button> <br>\n\
+<button onmouseup=fetch('/restart')>重启</button>\n\
 </div>\n\
 \n\
 <div style='float:left;'>\n\
@@ -312,33 +293,22 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
       <td id='sequence_id'>unknown</td>\n\
     </tr>\n\
     <tr>\n\
-      <td>hw_switch_state\n\
-        <div class='tooltip'>❔\n\
-          <span class='tooltiptext'>\n\
-            料线检测<br>\n\
-            1：正常<br>\n\
-            0：无料\n\
-          </span>\n\
-        </div>\n\
-        :\n\
+      <td>\n\
+        hw_switch_state<span data-bs-toggle=tooltip data-bs-html=true title='料线检测<br>1：正常<br>0：无料'>❔</span>:\n\
       </td>\n\
       <td id='hw_switch_state'>unknown</td>\n\
     </tr>\n\
     <tr>\n\
-      <td>ams_status\n\
-        <div class='tooltip'>❔\n\
-          <span class='tooltiptext'>\n\
-            258：加热喷嘴<br>\n\
-            259：剪断耗材丝<br>\n\
-            260:退料最后提示回抽<br>\n\
-            0：回抽完成<br>\n\
-            261：提示插入线材<br>\n\
-            262：插入成功，提示观察喷嘴<br>\n\
-            263：确认之后挤出材料并冲刷<br>\n\
-            768：进料完成<br>\n\
-            1280：正在打印（不确定）\n\
-          </span>\n\
-        </div>:\n\
+      <td>\n\
+        ams_status<span data-bs-toggle='tooltip' data-bs-html=true title='258：加热喷嘴<br>\n\
+          259：剪断耗材丝<br>\n\
+          260:退料最后提示回抽<br>\n\
+          0：回抽完成<br>\n\
+          261：提示插入线材<br>\n\
+          262：插入成功，提示观察喷嘴<br>\n\
+          263：确认之后挤出材料并冲刷<br>\n\
+          768：进料完成<br>\n\
+          1280：正在打印（不确定）'>❔</span>:\n\
       </td>\n\
       <td id='ams_status'>unknown</td>\n\
     </tr>\n\
@@ -356,6 +326,20 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
     </tr>\n\
   </table>\n\
 </div>\n\
+<!-- https://getbootstrap.com/docs/5.3/components/alerts/ -->\n\
+<div id='messages' class='position-fixed bottom-0 end-0 p-3' style='z-index: 5'></div>\n\
+<script>\n\
+  function print(message) {\n\
+    let para = document.createElement('div');\n\
+    para.setAttribute('class', 'alert alert-success alert-dismissible fade show');\n\
+    para.appendChild(document.createTextNode(message));\n\
+    let button = document.createElement('button');\n\
+    button.setAttribute('class', 'btn-close');\n\
+    button.setAttribute('data-bs-dismiss', 'alert');\n\
+    para.appendChild(button);\n\
+    document.getElementById('messages').appendChild(para);\n\
+  }\n\
+</script>\n\
 <script>\n\
   var gateway = `ws://${window.location.hostname}/ws`;\n\
   var websocket;\n\
@@ -377,7 +361,11 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
     console.log(event.data);\n\
     const data = JSON.parse(event.data);\n\
     for (let k in data) {\n\
-      document.getElementById(k).innerText = data[k];\n\
+      if (k == 'message') {\n\
+        print(data[k]);\n\
+      } else {\n\
+        document.getElementById(k).innerText = data[k];\n\
+      }\n\
     }\n\
   }\n\
 \n\
@@ -387,6 +375,12 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
     initWebSocket();\n\
   }\n\
 </script>\n\
+  <script>\n\
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle=tooltip]'))\n\
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {\n\
+      return new bootstrap.Tooltip(tooltipTriggerEl)\n\
+    })\n\
+  </script>\n\
 </html>";
 
   request->send(200, "text/html", html);
@@ -610,6 +604,10 @@ void test_backward(AsyncWebServerRequest* request) {
   request->send(200);
 }
 
+void restart(AsyncWebServerRequest* request) {
+  ESP.restart();
+}
+
 void wifi_setup() {
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("zhaipro-amslite", "zhaipro-amslite");
@@ -783,6 +781,7 @@ void wifi_server_setup() {
   server.on("/get_config", get_config);
   server.on("/get_local_ip", get_local_ip);
   server.on("/wifi_begin", wifi_begin);
+  server.on("/restart", restart);
   server.addHandler(&ws);
   server.begin();
   Serial.println("HTTP server started");
@@ -872,7 +871,8 @@ void loop() {
         bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
         bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
       } else {
-        Serial.printf("The bambu connection(LAN) failed!\nbambu_client.state() => %d\n", bambu_client.state());
+        ws.printfAll("{\"message\": \"The bambu connection(LAN) failed! state: %d\"}", bambu_client.state());
+        Serial.printf("The bambu connection(LAN) failed! state: %d\n", bambu_client.state());
         s_config.m_data["mode"] = "";
       }
     }
