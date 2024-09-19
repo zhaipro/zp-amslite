@@ -6,7 +6,6 @@
 #include <ESP32Servo.h>
 #include <ESPAsyncWebServer.h>
 #include <Wire.h>
-#include <Adafruit_SSD1306.h>
 #include <LittleFS.h>
 #include <HTTPClient.h>
 #include <arduino_base64.hpp>
@@ -78,6 +77,33 @@ PubSubClient bambu_client(wifi_client);
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
+class Config {
+public:
+  JsonDocument m_data;
+  void setup() {
+    if (LittleFS.exists("/config.json")) {
+      File file = LittleFS.open("/config.json", "r");
+      deserializeJson(m_data, file);
+      file.close();
+    }
+  }
+  template <typename T>
+  T get(const char* key, T default_value) {
+    if (m_data.containsKey(key)) {
+      return m_data["bambu_topic_publish"].as<T>();
+    } else {
+      return default_value;
+    }
+  }
+  void save() {
+    File file = LittleFS.open("/config.json", "w");
+    serializeJson(m_data, file);
+    file.close();
+  }
+};
+
+Config s_config;
+
 // 减速马达，通过 DRV8833 控制
 class Motor {
 public:
@@ -117,6 +143,8 @@ public:
     m_motor0.setup(m0pin1, m0pin2);
     m_motor1.setup(m1pin1, m1pin2);
     m_servo.attach(s1pin1);
+    m_servo_init = s_config.get("servo1_init", 90);
+    m_servo_power = s_config.get("servo_power", 30);
   }
 
   void forward(int id) {
@@ -214,9 +242,6 @@ void homepage(AsyncWebServerRequest* request) {
         }\n\
       });\n\
   }\n\
-  function wifi_begin() {\n\
-    do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])\n\
-  }\n\
   function get_local_ip() {\n\
     do_fetch('/get_local_ip')\n\
       .then((response) => response.json())\n\
@@ -245,16 +270,10 @@ void homepage(AsyncWebServerRequest* request) {
 </script>\n\
 \n\
 <div style='width:400px;float:left;'>\n\
-\n\
-<button onmouseup=get_config()>0. 获取配置信息</button> <br>\n\
+<form action='/put_config' target='stop'>\n\
 WiFi名称：<input name='WiFi_ssid'> <br>\n\
 WiFi密码：<input name='WiFi_passphrase'> <br>\n\
-<button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>\n\
-<button onmouseup=get_local_ip()>2. 获取 ip</button> <br>\n\
-3. 跳转到：<a id='local_ip'></a> <br>\n\
---------------------------------------------------\n\
-<form action='/put_config' target='stop'>\n\
-4. 请选择联机模式: \n\
+请选择联机模式: \n\
 <select name='mode' onchange=mode_change()>\n\
   <option value='WAN'>广域网模式</option>\n\
   <option value='LAN'>局域网模式</option>\n\
@@ -269,13 +288,15 @@ WiFi密码：<input name='WiFi_passphrase'> <br>\n\
   密码：<input name='password'> <br>\n\
 </div>\n\
 打印机序列号：<input name='bambu_device_serial'> <br>\n\
-servo1_init: <input type='number' name='servo1_init' value=90> <br>\n\
-servo_power: <input type='number' name='servo_power' value=30> <br>\n\
+舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>\n\
+舵机的力度: <input type='number' name='servo_power' value=30> <br>\n\
+<input type='submit' value='提交配置'>\n\
+--------------------------------------------------\n\
+</form>\n\
+<!-- 以下用于禁止提交信息后的页面跳转 -->\n\
+<iframe  name='stop' style='display:none;'></iframe>\n\
 有待退料管道：<input type='number' name='previous_extruder' value=0> <br>\n\
 有待进料管道：<input type='number' name='next_extruder' value=0> <br>\n\
-<input type='submit' value='5. 上传配置信息'>\n\
-</form>\n\
-<iframe  name='stop' style='display:none;'></iframe>\n\
 <button onmouseup=unload()>unload</button>\n\
 <button onmouseup=load()>load</button>\n\
 <button onmouseup=stop()>stop</button> <br>\n\
@@ -283,7 +304,9 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>\n\
 <button onmouseup=test_forward()>test_forward</button>\n\
 <button onmouseup=test_backward()>test_backward</button> <br>\n\
-<button onmouseup=fetch('/restart')>重启</button>\n\
+<button onmouseup=fetch('/restart')>重启</button> <br>\n\
+<button onmouseup=get_local_ip()>获取 ip</button> <br>\n\
+跳转到：<a id='local_ip'></a> <br>\n\
 </div>\n\
 \n\
 <div style='float:left;'>\n\
@@ -328,6 +351,7 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
 </div>\n\
 <!-- https://getbootstrap.com/docs/5.3/components/alerts/ -->\n\
 <div id='messages' class='position-fixed bottom-0 end-0 p-3' style='z-index: 5'></div>\n\
+\n\
 <script>\n\
   function print(message) {\n\
     let para = document.createElement('div');\n\
@@ -341,20 +365,10 @@ servo_power: <input type='number' name='servo_power' value=30> <br>\n\
   }\n\
 </script>\n\
 <script>\n\
-  var gateway = `ws://${window.location.hostname}/ws`;\n\
   var websocket;\n\
   function initWebSocket() {\n\
-    console.log('Trying to open a WebSocket connection...');\n\
-    websocket = new WebSocket(gateway);\n\
-    websocket.onopen    = onOpen;\n\
-    websocket.onclose   = onClose;\n\
+    websocket = new WebSocket(`ws://${window.location.hostname}/ws`);\n\
     websocket.onmessage = onMessage;\n\
-  }\n\
-  function onOpen(event) {\n\
-    console.log('Connection opened');\n\
-  }\n\
-  function onClose(event) {\n\
-    console.log('Connection closed');\n\
   }\n\
   function onMessage(event) {\n\
     console.log('On message:');\n\
@@ -393,118 +407,6 @@ double get_arg(AsyncWebServerRequest *request, const char* name, double default_
   return default_value;
 }
 
-class Config {
-public:
-  JsonDocument m_data;
-  void setup() {
-    if (LittleFS.exists("/config.json")) {
-      File file = LittleFS.open("/config.json", "r");
-      deserializeJson(m_data, file);
-      file.close();
-    }
-    if (!m_data.containsKey("mode")) {
-      m_data["mode"] = "";
-    }
-    if (!m_data.containsKey("bambu_mqtt_broker")) {
-      m_data["bambu_mqtt_broker"] = "";
-    }
-    if (!m_data.containsKey("bambu_mqtt_password")) {
-      m_data["bambu_mqtt_password"] = "";
-    }
-    if (!m_data.containsKey("bambu_device_serial")) {
-      m_data["bambu_device_serial"] = "";
-    }
-    if (!m_data.containsKey("servo_power")) {
-      m_data["servo_power"] = 30;
-    }
-    if (!m_data.containsKey("servo1_init")) {
-      m_data["servo1_init"] = 90;
-    }
-    if (!m_data.containsKey("WiFi_ssid")) {
-      m_data["WiFi_ssid"] = "";
-    }
-    if (!m_data.containsKey("WiFi_passphrase")) {
-      m_data["WiFi_passphrase"] = "";
-    }
-    if (!m_data.containsKey("previous_extruder")) {
-      m_data["previous_extruder"] = 0;
-    }
-    if (!m_data.containsKey("next_extruder")) {
-      m_data["next_extruder"] = 0;
-    }
-  }
-  void save() {
-    File file = LittleFS.open("/config.json", "w");
-    serializeJson(m_data, file);
-    file.close();
-  }
-};
-
-Config s_config;
-
-void get_config(AsyncWebServerRequest *request) {
-  AsyncResponseStream *response = request->beginResponseStream("application/json");
-  serializeJson(s_config.m_data, *response);
-  if (bambu_client.connected()) {
-    bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
-  }
-  request->send(response);
-}
-
-void put_config(AsyncWebServerRequest *request) {
-  AsyncWebParameter* param = nullptr;
-  param = request->getParam("mode");
-  if (param) {
-    s_config.m_data["mode"] = param->value();
-  }
-  param = request->getParam("phone_number");
-  if (param) {
-    s_config.m_data["phone_number"] = param->value();
-  }
-  if (request->hasParam("password")) {
-    s_config.m_data["password"] = request->getParam("password")->value();
-  }
-  if (request->hasParam("bambu_mqtt_broker")) {
-    s_config.m_data["bambu_mqtt_broker"] = request->getParam("bambu_mqtt_broker")->value();
-  }
-  if (request->hasParam("bambu_mqtt_password")) {
-    s_config.m_data["bambu_mqtt_password"] = request->getParam("bambu_mqtt_password")->value();
-  }
-  if (request->hasParam("bambu_device_serial")) {
-    const String& bambu_device_serial = request->getParam("bambu_device_serial")->value();
-    s_config.m_data["bambu_device_serial"] = bambu_device_serial;
-    s_config.m_data["bambu_topic_subscribe"] = "device/" + bambu_device_serial + "/report";
-    s_config.m_data["bambu_topic_publish"] = "device/" + bambu_device_serial + "/request";
-  }
-  if (request->hasParam("servo1_init")) {
-    ams_lite1.m_servo_init = request->getParam("servo1_init")->value().toInt();
-    s_config.m_data["servo1_init"] = ams_lite1.m_servo_init;
-  }
-  if (request->hasParam("servo_power")) {
-    ams_lite1.m_servo_power = request->getParam("servo_power")->value().toInt();
-    s_config.m_data["servo_power"] = ams_lite1.m_servo_power;
-  }
-
-  if (request->hasParam("previous_extruder")) {
-    s_config.m_data["previous_extruder"] = request->getParam("previous_extruder")->value().toInt();
-  }
-  if (request->hasParam("next_extruder")) {
-    s_config.m_data["next_extruder"] = request->getParam("next_extruder")->value().toInt();
-  }
-  s_config.save();
-  request->send(200);
-}
-
-void get_local_ip(AsyncWebServerRequest *request) {
-  AsyncResponseStream *response = request->beginResponseStream("application/json");
-  JsonDocument data;
-  if (WiFi.status() == WL_CONNECTED) {
-    data["local_ip"] = WiFi.localIP().toString();
-  }
-  serializeJson(data, *response);
-  request->send(response);
-}
-
 // 打印机通过 mqtt 发送来的信息
 // -1 表示未知
 int print_error = -1;
@@ -523,42 +425,80 @@ int previous_extruder = 0;
 // 有待进料管道
 int next_extruder = 0;
 
-// 在屏幕上打印些信息
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-// The pins for I2C are defined by the Wire-library. 
-// On an arduino UNO:       A4(SDA), A5(SCL)
-// On an arduino MEGA 2560: 20(SDA), 21(SCL)
-// On an arduino LEONARDO:   2(SDA),  3(SCL), ...
-#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-void oled_update() {
-  // 在OLED屏显示本机IP地址
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(WiFi.localIP());
-  display.printf("zp_state: %d\n", zp_state);
-  display.printf("previous_extruder: %d\n", previous_extruder);
-  display.printf("next_extruder: %d\n", next_extruder);
-
-  display.display();      // Show initial text
+void get_config(AsyncWebServerRequest *request) {
+  AsyncResponseStream *response = request->beginResponseStream("application/json");
+  serializeJson(s_config.m_data, *response);
+  if (bambu_client.connected()) {
+    bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+  }
+  request->send(response);
 }
 
-void display_setup() {
-  // 初始化显示屏
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println("SSD1306 allocation failed");
-    for(;;); // Don't proceed, loop forever
+void put_config(AsyncWebServerRequest *request) {
+  AsyncWebParameter* param = nullptr;
+  param = request->getParam("WiFi_ssid");
+  if (param) {
+    s_config.m_data["WiFi_ssid"] = param->value();
   }
+  param = request->getParam("WiFi_passphrase");
+  if (param) {
+    s_config.m_data["WiFi_passphrase"] = param->value();
+  }
+  // 如果没有联网，则进行连接；如果已经联网，则忽略
+  const String& ssid = s_config.m_data["WiFi_ssid"].as<String>();
+  const String& passphrase = s_config.m_data["WiFi_passphrase"].as<String>();
+  if (WiFi.status() != WL_CONNECTED && !ssid.isEmpty() && !passphrase.isEmpty()) {
+    WiFi.begin(ssid, passphrase);
+  }
+  param = request->getParam("mode");
+  if (param) {
+    s_config.m_data["mode"] = param->value();
+  }
+  param = request->getParam("phone_number");
+  if (param) {
+    s_config.m_data["phone_number"] = param->value();
+  }
+  param = request->getParam("password");
+  if (param) {
+    s_config.m_data["password"] = param->value();
+  }
+  param = request->getParam("bambu_mqtt_broker");
+  if (param) {
+    s_config.m_data["bambu_mqtt_broker"] = param->value();
+  }
+  param = request->getParam("bambu_mqtt_password");
+  if (param) {
+    s_config.m_data["bambu_mqtt_password"] = param->value();
+  }
+  param = request->getParam("bambu_device_serial");
+  if (param) {
+    const String& bambu_device_serial = param->value();
+    s_config.m_data["bambu_device_serial"] = bambu_device_serial;
+    s_config.m_data["bambu_topic_subscribe"] = "device/" + bambu_device_serial + "/report";
+    s_config.m_data["bambu_topic_publish"] = "device/" + bambu_device_serial + "/request";
+  }
+  param = request->getParam("servo1_init");
+  if (param) {
+    s_config.m_data["servo1_init"] = param->value().toInt();
+    ams_lite1.m_servo_init = param->value().toInt();
+  }
+  param = request->getParam("servo_power");
+  if (param) {
+    s_config.m_data["servo_power"] = param->value().toInt();
+    ams_lite1.m_servo_power = param->value().toInt();
+  }
+  s_config.save();
+  request->send(200);
+}
 
-  // 在OLED屏显示本机IP地址
-  oled_update();
+void get_local_ip(AsyncWebServerRequest *request) {
+  AsyncResponseStream *response = request->beginResponseStream("application/json");
+  JsonDocument data;
+  if (WiFi.status() == WL_CONNECTED) {
+    data["local_ip"] = WiFi.localIP().toString();
+  }
+  serializeJson(data, *response);
+  request->send(response);
 }
 
 void unload(AsyncWebServerRequest* request) {
@@ -605,8 +545,10 @@ void test_backward(AsyncWebServerRequest* request) {
 }
 
 void restart(AsyncWebServerRequest* request) {
+  request->send(200);
   ESP.restart();
 }
+
 
 void wifi_setup() {
   WiFi.mode(WIFI_AP_STA);
@@ -639,16 +581,6 @@ void wifi_setup() {
   } else {
     Serial.println(" failed");
   }
-}
-
-void wifi_begin(AsyncWebServerRequest* request) {
-  const String& ssid = request->getParam("WiFi_ssid")->value();
-  const String& passphrase = request->getParam("WiFi_passphrase")->value();
-  s_config.m_data["WiFi_ssid"] = ssid;
-  s_config.m_data["WiFi_passphrase"] = passphrase;
-  s_config.save();
-  WiFi.begin(ssid, passphrase);
-  request->send(200);
 }
 
 void bambu_callback(char* topic, byte* payload, unsigned int length) {
@@ -758,7 +690,6 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
     serializeJson(_data, buffer, sizeof(buffer));
     ws.textAll(buffer);
   }
-  oled_update();
 }
 
 void bambu_setup() {
@@ -780,7 +711,6 @@ void wifi_server_setup() {
   server.on("/put_config", put_config);
   server.on("/get_config", get_config);
   server.on("/get_local_ip", get_local_ip);
-  server.on("/wifi_begin", wifi_begin);
   server.on("/restart", restart);
   server.addHandler(&ws);
   server.begin();
@@ -800,7 +730,6 @@ void setup() {
   }
   s_config.setup();
   wifi_setup();
-  display_setup();
 #ifndef __DEBUG__
   bambu_setup();
 #endif

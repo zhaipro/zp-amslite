@@ -68,9 +68,6 @@
         }
       });
   }
-  function wifi_begin() {
-    do_fetch('/wifi_begin', ['WiFi_ssid', 'WiFi_passphrase'])
-  }
   function get_local_ip() {
     do_fetch('/get_local_ip')
       .then((response) => response.json())
@@ -99,16 +96,10 @@
 </script>
 
 <div style="width:400px;float:left;">
-
-<button onmouseup=get_config()>0. 获取配置信息</button> <br>
+<form action="/put_config" target="stop">
 WiFi名称：<input name="WiFi_ssid"> <br>
 WiFi密码：<input name="WiFi_passphrase"> <br>
-<button onmouseup=wifi_begin()>1. 连接 WiFi</button> <br>
-<button onmouseup=get_local_ip()>2. 获取 ip</button> <br>
-3. 跳转到：<a id="local_ip"></a> <br>
---------------------------------------------------
-<form action="/put_config" target="stop">
-4. 请选择联机模式: 
+请选择联机模式: 
 <select name="mode" onchange=mode_change()>
   <option value="WAN">广域网模式</option>
   <option value="LAN">局域网模式</option>
@@ -123,13 +114,15 @@ WiFi密码：<input name="WiFi_passphrase"> <br>
   密码：<input name="password"> <br>
 </div>
 打印机序列号：<input name="bambu_device_serial"> <br>
-servo1_init: <input type='number' name='servo1_init' value=90> <br>
-servo_power: <input type='number' name='servo_power' value=30> <br>
+舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>
+舵机的力度: <input type='number' name='servo_power' value=30> <br>
+<input type="submit" value="提交配置">
+--------------------------------------------------
+</form>
+<!-- 以下用于禁止提交信息后的页面跳转 -->
+<iframe  name="stop" style="display:none;"></iframe>
 有待退料管道：<input type='number' name='previous_extruder' value=0> <br>
 有待进料管道：<input type='number' name='next_extruder' value=0> <br>
-<input type="submit" value="5. 上传配置信息">
-</form>
-<iframe  name="stop" style="display:none;"></iframe>
 <button onmouseup=unload()>unload</button>
 <button onmouseup=load()>load</button>
 <button onmouseup=stop()>stop</button> <br>
@@ -137,7 +130,9 @@ servo_power: <input type='number' name='servo_power' value=30> <br>
 <button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>
 <button onmouseup=test_forward()>test_forward</button>
 <button onmouseup=test_backward()>test_backward</button> <br>
-<button onmouseup=fetch('/restart')>重启</button>
+<button onmouseup=fetch('/restart')>重启</button> <br>
+<button onmouseup=get_local_ip()>获取 ip</button> <br>
+跳转到：<a id="local_ip"></a> <br>
 </div>
 
 <div style="float:left;">
@@ -182,6 +177,7 @@ servo_power: <input type='number' name='servo_power' value=30> <br>
 </div>
 <!-- https://getbootstrap.com/docs/5.3/components/alerts/ -->
 <div id="messages" class="position-fixed bottom-0 end-0 p-3" style="z-index: 5"></div>
+
 <script>
   function print(message) {
     let para = document.createElement("div");
@@ -195,20 +191,10 @@ servo_power: <input type='number' name='servo_power' value=30> <br>
   }
 </script>
 <script>
-  var gateway = `ws://${window.location.hostname}/ws`;
   var websocket;
   function initWebSocket() {
-    console.log('Trying to open a WebSocket connection...');
-    websocket = new WebSocket(gateway);
-    websocket.onopen    = onOpen;
-    websocket.onclose   = onClose;
+    websocket = new WebSocket(`ws://${window.location.hostname}/ws`);
     websocket.onmessage = onMessage;
-  }
-  function onOpen(event) {
-    console.log('Connection opened');
-  }
-  function onClose(event) {
-    console.log('Connection closed');
   }
   function onMessage(event) {
     console.log('On message:');
