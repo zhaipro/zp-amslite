@@ -212,7 +212,12 @@ void homepage(AsyncWebServerRequest* request) {
     for (let k in kws) {\n\
       url.searchParams.append(k, kws[k]);\n\
     }\n\
-    return fetch(url);\n\
+    return fetch(url).then((response) => {\n\
+      if (!response.ok) {\n\
+        return response.text().then((text) => alert(text))\n\
+      }\n\
+      return response;\n\
+    });\n\
   }\n\
 \n\
   function unload() {\n\
@@ -290,7 +295,7 @@ WiFi密码：<input name='WiFi_passphrase'> <br>\n\
 打印机序列号：<input name='bambu_device_serial'> <br>\n\
 舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>\n\
 舵机的力度: <input type='number' name='servo_power' value=30> <br>\n\
-<input type='submit' value='提交配置'>\n\
+<input type='submit' value='提交配置'> <br>\n\
 --------------------------------------------------\n\
 </form>\n\
 <!-- 以下用于禁止提交信息后的页面跳转 -->\n\
@@ -502,12 +507,20 @@ void get_local_ip(AsyncWebServerRequest *request) {
 }
 
 void unload(AsyncWebServerRequest* request) {
+  if (gcode_state != "FINISH") {
+    request->send(400, "text", "当前非暂停状态，不可操控！");
+    return;
+  }
   previous_extruder = get_arg(request, "previous_extruder", 0);
   bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_unload);
   request->send(200);
 }
 
 void load(AsyncWebServerRequest* request) {
+  if (gcode_state != "FINISH") {
+    request->send(400, "text", "当前非暂停状态，不可操控！");
+    return;
+  }
   next_extruder = get_arg(request, "next_extruder", 0);
   bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_load);
   request->send(200);
@@ -531,6 +544,11 @@ void gcode_m109(AsyncWebServerRequest* request) {
 }
 
 void test_forward(AsyncWebServerRequest* request) {
+  // FINISH
+  if (gcode_state != "FINISH") {
+    request->send(400, "text", "当前非暂停状态，不可操控！");
+    return;
+  }
   next_extruder = get_arg(request, "next_extruder", 0);
   ams_lite1.forward(next_extruder);
   previous_extruder = next_extruder;
@@ -538,6 +556,10 @@ void test_forward(AsyncWebServerRequest* request) {
 }
 
 void test_backward(AsyncWebServerRequest* request) {
+  if (gcode_state != "FINISH") {
+    request->send(400, "text", "当前非暂停状态，不可操控！");
+    return;
+  }
   previous_extruder = get_arg(request, "previous_extruder", 0);
   ams_lite1.backward(previous_extruder);
   next_extruder = previous_extruder;
@@ -579,6 +601,7 @@ void wifi_setup() {
     Serial.println(" connected");
     Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
+    WiFi.disconnect();
     Serial.println(" failed");
   }
 }
@@ -740,6 +763,11 @@ void setup() {
 }
 
 void loop() {
+  if (Serial.available()) {
+    String s = Serial.readString();
+    s.replace("\n", "");
+    ws.printfAll("{\"message\": \"%s\"}", s.c_str());
+  }
 #ifndef __DEBUG__
   if (WiFi.status() == WL_CONNECTED && !bambu_client.connected()) {
     if (s_config.m_data["mode"] == "WAN") {

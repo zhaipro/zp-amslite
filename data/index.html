@@ -37,7 +37,12 @@
     for (let k in kws) {
       url.searchParams.append(k, kws[k]);
     }
-    return fetch(url);
+    return fetch(url).then((response) => {
+      if (!response.ok) {
+        return response.text().then((text) => alert(text))
+      }
+      return response;
+    });
   }
 
   function unload() {
@@ -116,7 +121,7 @@ WiFi密码：<input name="WiFi_passphrase"> <br>
 打印机序列号：<input name="bambu_device_serial"> <br>
 舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>
 舵机的力度: <input type='number' name='servo_power' value=30> <br>
-<input type="submit" value="提交配置">
+<input type="submit" value="提交配置"> <br>
 --------------------------------------------------
 </form>
 <!-- 以下用于禁止提交信息后的页面跳转 -->
