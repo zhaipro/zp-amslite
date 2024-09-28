@@ -9,6 +9,8 @@
 #include <LittleFS.h>
 #include <HTTPClient.h>
 #include <arduino_base64.hpp>
+#include <CRC16.h>
+#include <CRC8.h>
 
 #include "setups.h"
 
@@ -89,7 +91,7 @@ public:
   }
   template <typename T>
   T get(const char* key, T default_value) {
-    if (m_data.containsKey(key)) {
+    if (m_data[key].is<T>()) {
       return m_data["bambu_topic_publish"].as<T>();
     } else {
       return default_value;
@@ -175,236 +177,6 @@ public:
 
 AMSLite ams_lite1;
 
-void homepage(AsyncWebServerRequest* request) {
-  const char *html = "<!DOCTYPE html>\n\
-<html>\n\
-  <head>\n\
-    <meta charset='utf-8'>\n\
-    <meta name='viewport' content='width=device-width;text/html;initial-scale=1' http-equiv='Content-Type' />\n\
-    <link href='https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.3/css/bootstrap.min.css' rel='stylesheet'>\n\
-    <script src='https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js'></script>\n\
-  </head>\n\
-<style>\n\
-  div.hidden {display:none;}\n\
-</style>\n\
-<script>\n\
-  function do_fetch(pathname, params=null, kws=null) {\n\
-    var origin = window.location.origin;\n\
-    if (origin.startsWith('file')) {\n\
-      return;\n\
-    }\n\
-    var url = new URL(pathname, origin);\n\
-    if (params == null) {\n\
-      params = [];\n\
-    }\n\
-    for (let i in params) {\n\
-      var k = params[i];\n\
-      var e = document.getElementById(k);\n\
-      if (e == null) {\n\
-        e = document.getElementsByName(k)[0];\n\
-      }\n\
-      var v = e.value;\n\
-      url.searchParams.append(k, v);\n\
-    }\n\
-    if (kws == null) {\n\
-      kws = {}\n\
-    }\n\
-    for (let k in kws) {\n\
-      url.searchParams.append(k, kws[k]);\n\
-    }\n\
-    return fetch(url).then((response) => {\n\
-      if (!response.ok) {\n\
-        return response.text().then((text) => alert(text))\n\
-      }\n\
-      return response;\n\
-    });\n\
-  }\n\
-\n\
-  function unload() {\n\
-    do_fetch('/unload', ['previous_extruder'])\n\
-  }\n\
-  function load() {\n\
-    do_fetch('/load', ['next_extruder'])\n\
-  }\n\
-  function stop() {\n\
-    do_fetch('/stop', ['servo1_init', 'servo_power', 'previous_extruder', 'next_extruder'])\n\
-  }\n\
-  function test_forward() {\n\
-    do_fetch('/test_forward', ['next_extruder'])\n\
-  }\n\
-  function test_backward() {\n\
-    do_fetch('/test_backward', ['previous_extruder'])\n\
-  }\n\
-  function get_config() {\n\
-    do_fetch('/get_config')\n\
-      .then((response) => response.json())\n\
-      .then((data) => {\n\
-        for (let k in data) {\n\
-          var e = document.getElementsByName(k)[0];\n\
-          if (e) {\n\
-            e.value = data[k];\n\
-          }\n\
-        }\n\
-      });\n\
-  }\n\
-  function get_local_ip() {\n\
-    do_fetch('/get_local_ip')\n\
-      .then((response) => response.json())\n\
-      .then((data) => {\n\
-        var e = document.getElementById('local_ip');\n\
-        e.href = 'http://' + data['local_ip'];\n\
-        e.text = data['local_ip'];\n\
-      })\n\
-  }\n\
-  function on_load() {\n\
-    get_config();\n\
-  }\n\
-  window.addEventListener('load', on_load);\n\
-</script>\n\
-<script>\n\
-  function mode_change() {\n\
-    var mode = document.getElementsByName('mode')[0].value;\n\
-    if (mode == 'WAN') {\n\
-      document.getElementById('LAN').setAttribute('class', 'hidden');\n\
-      document.getElementById('WAN').setAttribute('class', '');\n\
-    } else if (mode == 'LAN'){\n\
-      document.getElementById('LAN').setAttribute('class', '');\n\
-      document.getElementById('WAN').setAttribute('class', 'hidden');\n\
-    }\n\
-  }\n\
-</script>\n\
-\n\
-<div style='width:400px;float:left;'>\n\
-<form action='/put_config' target='stop'>\n\
-WiFi名称：<input name='WiFi_ssid'> <br>\n\
-WiFi密码：<input name='WiFi_passphrase'> <br>\n\
-请选择联机模式: \n\
-<select name='mode' onchange=mode_change()>\n\
-  <option value='WAN'>广域网模式</option>\n\
-  <option value='LAN'>局域网模式</option>\n\
-</select>\n\
-<br>\n\
-<div id='LAN' class='hidden'>\n\
-  打印机ip地址：<input name='bambu_mqtt_broker'> <br>\n\
-  打印机访问码：<input name='bambu_mqtt_password'> <br>\n\
-</div>\n\
-<div id='WAN'>\n\
-  手机号码：<input name='phone_number'> <br>\n\
-  密码：<input name='password'> <br>\n\
-</div>\n\
-打印机序列号：<input name='bambu_device_serial'> <br>\n\
-舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>\n\
-舵机的力度: <input type='number' name='servo_power' value=30> <br>\n\
-<input type='submit' value='提交配置'> <br>\n\
---------------------------------------------------\n\
-</form>\n\
-<!-- 以下用于禁止提交信息后的页面跳转 -->\n\
-<iframe  name='stop' style='display:none;'></iframe>\n\
-有待退料管道：<input type='number' name='previous_extruder' value=0> <br>\n\
-有待进料管道：<input type='number' name='next_extruder' value=0> <br>\n\
-<button onmouseup=unload()>unload</button>\n\
-<button onmouseup=load()>load</button>\n\
-<button onmouseup=stop()>stop</button> <br>\n\
-<button onmouseup=fetch('/resume')>resume</button>\n\
-<button onmouseup=fetch('/gcode_m109')>gcode_m109</button> <br>\n\
-<button onmouseup=test_forward()>test_forward</button>\n\
-<button onmouseup=test_backward()>test_backward</button> <br>\n\
-<button onmouseup=fetch('/restart')>重启</button> <br>\n\
-<button onmouseup=get_local_ip()>获取 ip</button> <br>\n\
-跳转到：<a id='local_ip'></a> <br>\n\
-</div>\n\
-\n\
-<div style='float:left;'>\n\
-  <table>\n\
-    <tr>\n\
-      <td>sequence_id:</td>\n\
-      <td id='sequence_id'>unknown</td>\n\
-    </tr>\n\
-    <tr>\n\
-      <td>\n\
-        hw_switch_state<span data-bs-toggle=tooltip data-bs-html=true title='料线检测<br>1：正常<br>0：无料'>❔</span>:\n\
-      </td>\n\
-      <td id='hw_switch_state'>unknown</td>\n\
-    </tr>\n\
-    <tr>\n\
-      <td>\n\
-        ams_status<span data-bs-toggle='tooltip' data-bs-html=true title='258：加热喷嘴<br>\n\
-          259：剪断耗材丝<br>\n\
-          260:退料最后提示回抽<br>\n\
-          0：回抽完成<br>\n\
-          261：提示插入线材<br>\n\
-          262：插入成功，提示观察喷嘴<br>\n\
-          263：确认之后挤出材料并冲刷<br>\n\
-          768：进料完成<br>\n\
-          1280：正在打印（不确定）'>❔</span>:\n\
-      </td>\n\
-      <td id='ams_status'>unknown</td>\n\
-    </tr>\n\
-    <tr>\n\
-      <td>print_error: </td>\n\
-      <td id='print_error'>unknown</td>\n\
-    </tr>\n\
-    <tr>\n\
-      <td>gcode_state: </td>\n\
-      <td id='gcode_state'>unknown</td>\n\
-    </tr>\n\
-    <tr>\n\
-      <td>mc_percent: </td>\n\
-      <td id='mc_percent'>unknown</td>\n\
-    </tr>\n\
-  </table>\n\
-</div>\n\
-<!-- https://getbootstrap.com/docs/5.3/components/alerts/ -->\n\
-<div id='messages' class='position-fixed bottom-0 end-0 p-3' style='z-index: 5'></div>\n\
-\n\
-<script>\n\
-  function print(message) {\n\
-    let para = document.createElement('div');\n\
-    para.setAttribute('class', 'alert alert-success alert-dismissible fade show');\n\
-    para.appendChild(document.createTextNode(message));\n\
-    let button = document.createElement('button');\n\
-    button.setAttribute('class', 'btn-close');\n\
-    button.setAttribute('data-bs-dismiss', 'alert');\n\
-    para.appendChild(button);\n\
-    document.getElementById('messages').appendChild(para);\n\
-  }\n\
-</script>\n\
-<script>\n\
-  var websocket;\n\
-  function initWebSocket() {\n\
-    websocket = new WebSocket(`ws://${window.location.hostname}/ws`);\n\
-    websocket.onmessage = onMessage;\n\
-  }\n\
-  function onMessage(event) {\n\
-    console.log('On message:');\n\
-    console.log(event.data);\n\
-    const data = JSON.parse(event.data);\n\
-    for (let k in data) {\n\
-      if (k == 'message') {\n\
-        print(data[k]);\n\
-      } else {\n\
-        document.getElementById(k).innerText = data[k];\n\
-      }\n\
-    }\n\
-  }\n\
-\n\
-  window.addEventListener('load', onLoad);\n\
-\n\
-  function onLoad(event) {\n\
-    initWebSocket();\n\
-  }\n\
-</script>\n\
-  <script>\n\
-    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle=tooltip]'))\n\
-    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {\n\
-      return new bootstrap.Tooltip(tooltipTriggerEl)\n\
-    })\n\
-  </script>\n\
-</html>";
-
-  request->send(200, "text/html", html);
-}
-
 double get_arg(AsyncWebServerRequest *request, const char* name, double default_value = 0.0) {
   if (request->hasParam(name)) {
     return request->getParam(name)->value().toDouble();
@@ -434,7 +206,7 @@ void get_config(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("application/json");
   serializeJson(s_config.m_data, *response);
   if (bambu_client.connected()) {
-    bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+    bambu_client.publish(s_config.m_data["bambu_topic_publish"], bambu_pushall);
   }
   request->send(response);
 }
@@ -507,7 +279,7 @@ void get_local_ip(AsyncWebServerRequest *request) {
 }
 
 void unload(AsyncWebServerRequest* request) {
-  if (gcode_state != "FINISH") {
+  if (gcode_state != "FINISH" && gcode_state != "FAILURE") {
     request->send(400, "text", "当前非暂停状态，不可操控！");
     return;
   }
@@ -575,11 +347,11 @@ void restart(AsyncWebServerRequest* request) {
 void wifi_setup() {
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("zhaipro-amslite", "zhaipro-amslite");
-  if (!s_config.m_data.containsKey("WiFi_ssid") || !s_config.m_data.containsKey("WiFi_passphrase")) {
+  if (!s_config.m_data["WiFi_ssid"].is<const char*>() || !s_config.m_data["WiFi_passphrase"].is<const char*>()) {
     return;
   }
-  const String& ssid = s_config.m_data["WiFi_ssid"].as<String>();
-  const String& passphrase = s_config.m_data["WiFi_passphrase"].as<String>();
+  const String& ssid = s_config.m_data["WiFi_ssid"];
+  const String& passphrase = s_config.m_data["WiFi_passphrase"];
   if (ssid.isEmpty() || passphrase.isEmpty()) {
     return;
   }
@@ -610,24 +382,23 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
   // https://arduinojson.org/v7/api/jsondocument/
   JsonDocument data;
   deserializeJson(data, payload, length);
-  if (!data.containsKey("print")) {
+  if (!data["print"].is<JsonObject>()) {
     // 收到未知信息，直接不理睬
     return;
   }
 
   JsonDocument _data;
-
-  const char* sequence_id = data["print"]["sequence_id"].as<const char*>();
-  if (data["print"].containsKey("hw_switch_state")) {
-    hw_switch_state = data["print"]["hw_switch_state"].as<int>();
+  const char* sequence_id = data["print"]["sequence_id"];
+  if (data["print"]["hw_switch_state"].is<int>()) {
+    hw_switch_state = data["print"]["hw_switch_state"];
     _data["hw_switch_state"] = hw_switch_state;
   }
-  if (data["print"].containsKey("gcode_state")) {
+  if (data["print"]["gcode_state"].is<const char*>()) {
     gcode_state = data["print"]["gcode_state"].as<String>();
     _data["gcode_state"] = gcode_state;
   }
-  if (data["print"].containsKey("mc_percent")) {
-    mc_percent = data["print"]["mc_percent"].as<int>();
+  if (data["print"]["mc_percent"].is<int>()) {
+    mc_percent = data["print"]["mc_percent"];
     _data["mc_percent"] = mc_percent;
   }
   if (gcode_state != "PAUSE") {
@@ -652,8 +423,8 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
       bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_resume);
     }
   }
-  if (data["print"].containsKey("ams_status")) {
-    ams_status = data["print"]["ams_status"].as<int>();
+  if (data["print"]["ams_status"].is<int>()) {
+    ams_status = data["print"]["ams_status"];
     _data["ams_status"] = ams_status;
     Serial.printf("bambu sequence_id: \"%s\" ams_status: %d\n", sequence_id, ams_status);
 
@@ -693,8 +464,8 @@ void bambu_callback(char* topic, byte* payload, unsigned int length) {
     */
   }
   
-  if (data["print"].containsKey("print_error")) {
-    print_error = data["print"]["print_error"].as<int>();
+  if (data["print"]["print_error"].is<int>()) {
+    print_error = data["print"]["print_error"];
     _data["print_error"] = print_error;
     Serial.printf("bambu sequence_id: \"%s\" print_error: %d\n", sequence_id, print_error);
     // 318750726 0b1001011111111 11000000 00000110 请推入耗材？
@@ -723,7 +494,8 @@ void bambu_setup() {
 }
 
 void wifi_server_setup() {
-  server.on("/", homepage);
+  server.rewrite("/", "/index.html");
+  server.serveStatic("/", LittleFS, "/");
   server.on("/unload", unload);
   server.on("/load", load);
   server.on("/stop", stop);
@@ -740,8 +512,26 @@ void wifi_server_setup() {
   Serial.println("HTTP server started");
 }
 
+CRC16 crc16(0x1021, 0x913D, 0, false, false);
+CRC8 crc8(0x39, 0x66, 0, false, false);
+
+#define RS485 Serial1
+#define RS485_RTS_PIN 4
+
 void setup() {
   Serial.begin(115200);
+  RS485.begin(1228800, SERIAL_8E1, 16, 17);
+  if (!RS485.setPins(-1, -1, -1, RS485_RTS_PIN)) {
+    Serial.print("Failed to set RS485 pins");
+  }
+
+  // Certain versions of Arduino core don't define MODE_RS485_HALF_DUPLEX and so fail to compile.
+  // By using UART_MODE_RS485_HALF_DUPLEX defined in hal/uart_types.h we work around this problem.
+  // If using a newer IDF and Arduino core you can omit including hal/uart_types.h and use MODE_RS485_HALF_DUPLEX
+  // defined in esp32-hal-uart.h (included during other build steps) instead.
+  if (!RS485.setMode(UART_MODE_RS485_HALF_DUPLEX)) {
+    Serial.print("Failed to set RS485 mode");
+  }
   // Serial.println(String(ESP.getEfuseMac(), HEX).c_str());
   // https://randomnerdtutorials.com/esp32-write-data-littlefs-arduino/
   //  You only need to format LittleFS the first time you run a
@@ -758,9 +548,44 @@ void setup() {
 #endif
   wifi_server_setup();
   ams_lite1.setup(12, 13, 27, 26, 14);
-  ams_lite1.m_servo_init = s_config.m_data["servo1_init"].as<int>();
-  ams_lite1.m_servo_power = s_config.m_data["servo_power"].as<int>();
+  ams_lite1.m_servo_init = s_config.m_data["servo1_init"];
+  ams_lite1.m_servo_power = s_config.m_data["servo_power"];
 }
+
+typedef struct {
+  uint8_t head;         // 帧头 0x3D
+  uint8_t type;
+  union {
+    struct {            // type: 0x80
+      uint8_t size;
+      uint8_t rv;       // crc8
+      uint8_t cmd;
+      uint8_t data[1];
+    } body_80;
+    struct {            // type: 0x00
+      uint8_t temp2;
+      uint8_t temp3;
+      uint8_t size;
+      uint8_t temp5;
+      uint8_t rv;       // crc8
+      uint8_t cmd;
+      uint8_t data[1];
+    } body_00;
+  };
+} bambu_data_t;
+
+#include <assert.h>
+
+static_assert(sizeof(bambu_data_t) == 9, "");
+
+unsigned char F10_res[] = {0x3D, 0xC0, 0x1D, 0xB4, 0x05,
+                           0x01, 0x00, 0x20, 0x9B,
+                           0x31, 0x33, 0x34, 0x36,
+                           0x35, 0x02, 0x00, 0x37,
+                           0x39, 0x33, 0x38,
+                           0xFF, 0xFF, 0xFF, 0xFF,
+                           0x00, 0x00, 0x00,
+                           0x00, 0x00};
 
 void loop() {
   if (Serial.available()) {
@@ -768,19 +593,117 @@ void loop() {
     s.replace("\n", "");
     ws.printfAll("{\"message\": \"%s\"}", s.c_str());
   }
+  static uint8_t buffer[256];
+  static uint8_t buffer2[256];
+  static size_t end = 0;
+  if (RS485.available()) {
+    end = RS485.readBytes(buffer + end, 256 - end) + end;
+    int i = 0;
+    for (; i < end; i++) {
+      if (buffer[i] == 0x3d) {
+        break;
+      }
+    }
+    if (i == end) {
+      end = 0;
+    } else if (i > 0) {
+      memcpy(buffer, buffer + i, end - i);
+      end = end - i;
+    }
+    bambu_data_t *bambu_data = (bambu_data_t*)buffer;
+    if (end >= 5) {
+      if (bambu_data->type & 0x80) {
+        if (end >= bambu_data->body_80.size) {
+          // 0x20 是心跳信号，可以忽略啦
+          if (bambu_data->body_80.cmd != 0x20) {
+            String string_to_hex;
+            for(int i = 0; i < bambu_data->body_80.size; i++) {
+              uint8_t c2 = ((uint8_t*)bambu_data)[i];
+              uint8_t c1 = c2 >> 4;
+              c2 = c2 & 0x0f;
+              string_to_hex += String(c1, HEX);
+              string_to_hex += String(c2, HEX);
+            }
+            ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
+          }
+          memcpy(buffer2, buffer, bambu_data->body_80.size);
+          bambu_data = (bambu_data_t*)buffer2;
+          end = end - bambu_data->body_80.size;
+          memcpy(buffer, buffer + bambu_data->body_80.size, end);
+          if (bambu_data->type == 0xc5 && bambu_data->body_80.cmd == 0x05 && bambu_data->body_80.data[0] == 0x01 && bambu_data->body_80.data[1] == 0x00) {
+            bambu_data->type = 0xc0;
+            bambu_data->body_80.size = 0x1d;
+            crc8.restart();
+            crc8.add((uint8_t*)bambu_data, 3);
+            bambu_data->body_80.rv = crc8.calc();
+            crc16.restart();
+            crc16.add((uint8_t*)bambu_data, bambu_data->body_80.size - 2);
+            int num = crc16.calc();
+            int size = bambu_data->body_80.size;
+            ((uint8_t*)bambu_data)[size - 2] = num & 0xFF;
+            ((uint8_t*)bambu_data)[size - 1] = num >> 8;
+            
+            // delayMicroseconds(100);
+            RS485.write((uint8_t*)bambu_data, size);
+            /*
+            crc16.restart();
+            int size = 0x1D;
+            crc16.add((uint8_t*)F10_res, size - 2);
+            int num = crc16.calc();
+            ((uint8_t*)F10_res)[size - 2] = num & 0xFF;
+            ((uint8_t*)F10_res)[size - 1] = num >> 8;
+            Serial1.write((uint8_t*)F10_res, size);
+            // Serial1.write((uint8_t*)bambu_data, size);
+            // Serial1.flush(true);
+            */
+
+            String string_to_hex;
+            for(int i = 0; i < bambu_data->body_80.size; i++) {
+            // for(int i = 0; i < ((bambu_data_t*)F10_res)->body_80.size; i++) {
+              uint8_t c2 = ((uint8_t*)bambu_data)[i];
+              // uint8_t c2 = ((uint8_t*)F10_res)[i];
+              uint8_t c1 = c2 >> 4;
+              c2 = c2 & 0x0f;
+              string_to_hex += String(c1, HEX);
+              string_to_hex += String(c2, HEX);
+            }
+            ws.printfAll("{\"ams\": \"=> %s\"}", string_to_hex.c_str());
+          }
+        }
+      } else {
+        if (end >= bambu_data->body_00.size) {
+          String string_to_hex;
+          for(int i = 0; i < bambu_data->body_00.size; i++) {
+            uint8_t c2 = ((uint8_t*)bambu_data)[i];
+            uint8_t c1 = c2 >> 4;
+            c2 = c2 & 0x0f;
+            string_to_hex += String(c1, HEX);
+            string_to_hex += String(c2, HEX);
+          }
+          if (bambu_data->body_00.data[0] == 0x12) {
+            ws.printfAll("{\"ams\": \"!!! %s\"}", string_to_hex.c_str());
+          } else {
+            ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
+          }
+          end = end - bambu_data->body_00.size;
+          memcpy(buffer, buffer + bambu_data->body_00.size, end);
+        }
+      }
+    }
+  }
 #ifndef __DEBUG__
   if (WiFi.status() == WL_CONNECTED && !bambu_client.connected()) {
     if (s_config.m_data["mode"] == "WAN") {
       const char* bambu_mqtt_id = "mqttx_c59bbf21";
-      const char* username = s_config.m_data["username"].as<const char*>();
-      const char* access_token = s_config.m_data["access_token"].as<const char*>();
+      const char* username = s_config.m_data["username"];
+      const char* access_token = s_config.m_data["access_token"];
       if (username && access_token) {
         Serial.printf("bambu_client.connect(<id>, \"%s\", <token>)\n", username);
         bambu_client.setServer("cn.mqtt.bambulab.com", 8883);
         if (bambu_client.connect(bambu_mqtt_id, username, access_token)) {
           Serial.println("Connecting to bambu .. connected!");
-          bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"].as<const char*>());
-          bambu_client.publish(s_config.m_data["bambu_topic_publish"].as<const char*>(), bambu_pushall);
+          bambu_client.subscribe(s_config.m_data["bambu_topic_subscribe"]);
+          bambu_client.publish(s_config.m_data["bambu_topic_publish"], bambu_pushall);
         } else {
           Serial.printf("The bambu connection(WAN) failed!\nbambu_client.state() => %d\n", bambu_client.state());
           s_config.m_data.remove("username");

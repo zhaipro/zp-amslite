@@ -68,7 +68,6 @@
           var e = document.getElementsByName(k)[0];
           if (e) {
             e.value = data[k];
-            // e.setAttribute('value', data[k]);
           }
         }
       });
@@ -101,31 +100,36 @@
 </script>
 
 <div style="width:400px;float:left;">
-<form action="/put_config" target="stop">
-WiFi名称：<input name="WiFi_ssid"> <br>
-WiFi密码：<input name="WiFi_passphrase"> <br>
-请选择联机模式: 
-<select name="mode" onchange=mode_change()>
-  <option value="WAN">广域网模式</option>
-  <option value="LAN">局域网模式</option>
-</select>
-<br>
-<div id="LAN" class="hidden">
-  打印机ip地址：<input name="bambu_mqtt_broker"> <br>
-  打印机访问码：<input name="bambu_mqtt_password"> <br>
-</div>
-<div id="WAN">
-  手机号码：<input name="phone_number"> <br>
-  密码：<input name="password"> <br>
-</div>
-打印机序列号：<input name="bambu_device_serial"> <br>
-舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>
-舵机的力度: <input type='number' name='servo_power' value=30> <br>
-<input type="submit" value="提交配置"> <br>
---------------------------------------------------
-</form>
-<!-- 以下用于禁止提交信息后的页面跳转 -->
-<iframe  name="stop" style="display:none;"></iframe>
+  <button data-bs-toggle="collapse" data-bs-target="#config">
+    编写配置🔽
+  </button>
+  <div class="collapse show" id="config" aria-expanded="true">
+    <form action="/put_config" target="stop">
+    WiFi名称：<input name="WiFi_ssid"> <br>
+    WiFi密码：<input name="WiFi_passphrase"> <br>
+    请选择联机模式: 
+    <select name="mode" onchange=mode_change()>
+      <option value="WAN">广域网模式</option>
+      <option value="LAN">局域网模式</option>
+    </select>
+    <br>
+    <div id="LAN" class="hidden">
+      打印机ip地址：<input name="bambu_mqtt_broker"> <br>
+      打印机访问码：<input name="bambu_mqtt_password"> <br>
+    </div>
+    <div id="WAN">
+      手机号码：<input name="phone_number"> <br>
+      密码：<input name="password"> <br>
+    </div>
+    打印机序列号：<input name="bambu_device_serial"> <br>
+    舵机的初始角度: <input type='number' name='servo1_init' value=90> <br>
+    舵机的力度: <input type='number' name='servo_power' value=30> <br>
+    <input type="submit" value="提交配置"> <br>
+    </form>
+    <!-- 以下用于禁止提交信息后的页面跳转 -->
+    <iframe  name="stop" style="display:none;"></iframe>
+  </div>
+-------------------------------------------------- <br>
 有待退料管道：<input type='number' name='previous_extruder' value=0> <br>
 有待进料管道：<input type='number' name='next_extruder' value=0> <br>
 <button onmouseup=unload()>unload</button>
@@ -200,6 +204,11 @@ WiFi密码：<input name="WiFi_passphrase"> <br>
   function initWebSocket() {
     websocket = new WebSocket(`ws://${window.location.hostname}/ws`);
     websocket.onmessage = onMessage;
+    websocket.onopen = onopen;
+  }
+  function onopen(event) {
+    let e = new bootstrap.Collapse('#config');
+    e.hide();
   }
   function onMessage(event) {
     console.log('On message:');
@@ -208,6 +217,8 @@ WiFi密码：<input name="WiFi_passphrase"> <br>
     for (let k in data) {
       if (k == "message") {
         print(data[k]);
+      } else if (k == "ams") {
+        console.log(data[k]);
       } else {
         document.getElementById(k).innerText = data[k];
       }
