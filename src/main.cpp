@@ -15,7 +15,7 @@
 #include "setups.h"
 
 // 开启调试模式，esp32 将不会连接拓竹
-// #define __DEBUG__
+#define __DEBUG__
 
 // 拓竹指令
 // 执行 Unload 指令，打印机将开始自动加热热端，并切断线材。
@@ -495,7 +495,6 @@ void bambu_setup() {
 
 void wifi_server_setup() {
   server.rewrite("/", "/index.html");
-  server.serveStatic("/", LittleFS, "/");
   server.on("/unload", unload);
   server.on("/load", load);
   server.on("/stop", stop);
@@ -508,6 +507,7 @@ void wifi_server_setup() {
   server.on("/get_local_ip", get_local_ip);
   server.on("/restart", restart);
   server.addHandler(&ws);
+  server.serveStatic("/", LittleFS, "/");
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -565,10 +565,10 @@ typedef struct {
     struct {            // type: 0x00
       uint8_t temp2;
       uint8_t temp3;
-      uint8_t size;
+      uint8_t size;     // 4
       uint8_t temp5;
       uint8_t rv;       // crc8
-      uint8_t cmd;
+      uint8_t cmd;      // 7
       uint8_t data[1];
     } body_00;
   };
@@ -578,23 +578,384 @@ typedef struct {
 
 static_assert(sizeof(bambu_data_t) == 9, "");
 
-unsigned char F10_res[] = {0x3D, 0xC0, 0x1D, 0xB4, 0x05,
-                           0x01, 0x00, 0x20, 0x9B,
-                           0x31, 0x33, 0x34, 0x36,
-                           0x35, 0x02, 0x00, 0x37,
-                           0x39, 0x33, 0x38,
-                           0xFF, 0xFF, 0xFF, 0xFF,
-                           0x00, 0x00, 0x00,
-                           0x00, 0x00};
+typedef struct {
+  uint8_t index;
+  uint8_t temp;
+  uint8_t id[8];
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  uint8_t a;
+  uint16_t temperature_min;
+  uint16_t temperature_max;
+  uint8_t name[20];   // 耗材的名称如：PLA
+} filament_t;
+static_assert(sizeof(filament_t) == 38);
+filament_t filaments[4];
+
+typedef struct {
+  int motion_set;
+  float meters;
+} filament_ex_t;
+filament_ex_t filaments_ex[4];
+
+#pragma pack (1)
+typedef struct {
+  uint8_t head;         // 帧头 0x3D
+  uint8_t type;
+  union {
+    struct {            // type: 0x80
+      uint8_t size;
+      uint8_t rv;       // crc8
+      uint8_t cmd;
+      union {
+        filament_t filament;
+      } data;
+    } body_80;
+    struct {            // type: 0x00
+      uint8_t temp2;
+      uint8_t temp3;
+      uint8_t size;     // 4
+      uint8_t temp5;
+      uint8_t rv;       // crc8
+      uint8_t cmd;      // 7
+      uint8_t data[1];
+    } body_00;
+  };
+} bambu_data_ex_t;
+#pragma pack ()
+
+static_assert(sizeof(bambu_data_ex_t) == 43, "");
+
+void bambu_send(bambu_data_t *data) {
+  size_t size;
+  crc8.restart();
+  if (data->type & 0x80) {
+    crc8.add((uint8_t*)data, 3);
+    data->body_80.rv = crc8.calc();
+    size = data->body_80.size;
+  } else {
+    crc8.add((uint8_t*)data, 6);
+    data->body_00.rv = crc8.calc();
+    size = data->body_00.size;
+  }
+  crc16.restart();
+  crc16.add((uint8_t*)data, size - 2);
+  int rv = crc16.calc();
+  ((uint8_t*)data)[size - 2] = rv & 0xFF;
+  ((uint8_t*)data)[size - 1] = rv >> 8;
+  RS485.write((uint8_t*)data, size);
+}
+
+typedef struct {
+  uint8_t head;         // 帧头 0x3D
+  uint8_t type;
+  uint8_t temp2;
+  uint8_t temp3;
+  uint8_t size;     // 4
+  uint8_t temp5;
+  uint8_t rv;       // crc8
+  uint8_t cmd;      // 7
+  uint8_t temp8;
+  uint8_t temp9;
+  uint8_t temp10;
+  uint8_t temp11;
+  uint8_t temp12;
+  uint8_t temp13;
+  uint8_t index;    // 第几个
+  uint8_t data[1];
+} bambu_data__t;
+
+uint8_t X05_MC_AP_Read_filament_res[] = {
+        0x3D, 0x00, 0x00, 0x00, 0x92, 0x00, 0x2B, 0x00,
+        0x06, 0x00, 0x12, 0x11, 0x02, 0x00, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x47, 0x46, 0x47, 0x39, 0x39, 0x00, 0x00, 0x00,   // id
+        0x50, 0x45, 0x54, 0x47, 0x00, 0x00, 0x00, 0x00,   // name：PETG
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x16, 0x16, 0x16, 0xFF, 0x00, 0x00, 0x00, 0x00,   // 颜色
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x0E, 0x01, 0xE6, 0x00,   // 温度：[230, 270]
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00};
+void on_get_filament(const bambu_data_t *data)
+{
+  // x - 8
+  if (data->body_00.data[3] == 0x11) {
+    uint8_t n = data->body_00.data[6];
+    X05_MC_AP_Read_filament_res[14] = n;
+    // [14, 15)
+    X05_MC_AP_Read_filament_res[72] = filaments[n].r;
+    X05_MC_AP_Read_filament_res[73] = filaments[n].g;
+    X05_MC_AP_Read_filament_res[74] = filaments[n].b;
+    X05_MC_AP_Read_filament_res[75] = filaments[n].a;
+    // [72, 76)
+
+    memcpy(X05_MC_AP_Read_filament_res + 32, filaments[n].id, sizeof(filaments[n].id));
+    memcpy(X05_MC_AP_Read_filament_res + 40, filaments[n].name, sizeof(filaments[n].name));
+    // [32, 60)
+    memcpy(X05_MC_AP_Read_filament_res + 92, &filaments[n].temperature_min, sizeof(filaments[n].temperature_min));
+    memcpy(X05_MC_AP_Read_filament_res + 94, &filaments[n].temperature_max, sizeof(filaments[n].temperature_max));
+    // [92, 96)
+    bambu_send((bambu_data_t*)X05_MC_AP_Read_filament_res);
+  }
+}
+
+void on_set_filament(bambu_data_ex_t *data) {
+  filaments[data->body_80.data.filament.index] = data->body_80.data.filament;
+  uint8_t restuls[0x08]{0x3D, 0xC0, 0x08, 0xB2, 0x08, 0x60};
+  bambu_send((bambu_data_t*)restuls);
+}
+
+#define C_test 0x00, 0x00, 0x00, 0xFF, \
+               0x00, 0x00, 0x80, 0xBF, \
+               0x00, 0x00, 0x00, 0xC0, \
+               0x00, 0xC0, 0x5D, 0xFF, \
+               0xFC, 0xFF, 0xFC, 0xFF, \
+               0x00, 0x00, 0x44, 0x00, \
+               0x55,                   \
+               0xC1, 0xC3, 0xEC, 0xBC, \
+               0x01, 0x01, 0x01, 0x01,
+unsigned char Dxx_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x04,
+                           0x00, 0x00, 0x00, 0x00,
+                           0x04, 0x04, 0x04, 0xFF, // flags
+                           0x00, 0x00, 0x00, 0x00,
+                           C_test 0x00, 0x00, 0x00, 0x00,
+                           0x64, 0x64, 0x64, 0x64,
+                           0x90, 0xE4};
+uint8_t packge_num = 0;
+
+
+
+int now_filament_num = -1;
+int last_time = 0;
+int now_fliment_motion_flag = -1;
+unsigned char Cxx_res[] = {0x3D, 0xE0, 0x2C, 0x1A, 0x03,
+                           C_test 0x00, 0x00, 0x00, 0x00,
+                           0x90, 0xE4};
+void on_get_meters(const bambu_data_ex_t *data) {
+  const uint8_t *buf = (const uint8_t*)data;
+  Cxx_res[1] = 0xC0 | (packge_num << 3);
+
+  uint8_t read_num = buf[7];
+  unsigned char fliment_motion_flag = buf[8];
+  float meters = -1;
+  if (read_num < 4) {
+    filaments_ex[read_num].motion_set = fliment_motion_flag;
+    if (read_num != now_filament_num || now_fliment_motion_flag != fliment_motion_flag) {
+      now_fliment_motion_flag = fliment_motion_flag;
+      Serial.printf("on_get_meters fliment: %d, motion_flag: %x meters: %f\n", read_num, fliment_motion_flag, filaments_ex[read_num].meters);
+    }
+    int now_time =  millis();
+    if (read_num != now_filament_num) {
+      now_filament_num = read_num;
+      filaments_ex[read_num].meters = 0;
+      last_time = now_time;
+    }
+    if (fliment_motion_flag == 0x3f) {        // 请求退料
+      filaments_ex[read_num].meters -= (now_time - last_time) / 1000.0 * 5.0;
+      if (read_num == 0) {
+        ams_lite1.backward(0);
+      }
+    } else if (fliment_motion_flag == 0xbf) { // 请求进料
+      if (read_num == 0) {
+        ams_lite1.forward(0);
+      }
+      // filaments_ex[read_num].meters += (now_time - last_time) / 1000.0 * 5.0;
+    } else {
+      if (read_num == 0) {
+        ams_lite1.stop();
+      }
+    }
+    meters = filaments_ex[read_num].meters;
+    last_time = now_time;
+  }
+  uint8_t flagx = 0x02;
+  Cxx_res[7] = flagx;
+  Cxx_res[8] = read_num;
+  memcpy(Cxx_res + 9, &meters, sizeof(meters));
+
+  bambu_send((bambu_data_t*)Cxx_res);
+  packge_num = (packge_num + 1) % 8;
+}
+
+
+void on_get_status(const bambu_data_t *data) {
+  unsigned char filament_flag_on = 0x00;
+  unsigned char filament_flag_NFC = 0x00;
+  unsigned char fliment_motion_flag = data->body_80.data[2];
+  unsigned char read_num = data->body_80.data[4];
+  float meters = -1;
+  uint8_t flagx=0x02;
+
+  filament_flag_on = 0x0f;  // 四个都在线
+
+  if (read_num < 4) {
+    filaments_ex[read_num].motion_set = fliment_motion_flag;
+    now_filament_num = read_num;
+    if (read_num != now_filament_num || now_fliment_motion_flag != fliment_motion_flag) {
+      now_fliment_motion_flag = fliment_motion_flag;
+
+      Serial.printf("on_get_status fliment: %d, motion_flag: %x meters: %d\n", read_num, fliment_motion_flag, filaments_ex[read_num].meters);
+    }
+    int now_time =  millis();
+    if (read_num != now_filament_num) {
+      now_filament_num = read_num;
+      filaments_ex[read_num].meters = 0;
+      last_time = now_time;
+    }
+    if (fliment_motion_flag == 0x3f) {        // 请求退料
+      filaments_ex[read_num].meters -= (now_time - last_time) / 1000.0 * 5.0;
+      if (read_num == 0) {
+        ams_lite1.backward(0);
+      }
+    } else if (fliment_motion_flag == 0xbf) { // 请求进料
+      // filaments_ex[read_num].meters += (now_time - last_time) / 1000.0 * 5.0;
+      if (read_num == 0) {
+        ams_lite1.forward(0);
+      }
+    } else {
+      if (read_num == 0) {
+        ams_lite1.stop();
+      }
+    }
+    meters = filaments_ex[read_num].meters;
+    last_time = now_time;
+  }
+
+  Dxx_res[1] = 0xC0 | (packge_num << 3);
+  Dxx_res[9] = filament_flag_on;
+  Dxx_res[10] = filament_flag_on - filament_flag_NFC;
+  Dxx_res[11] = filament_flag_on - filament_flag_NFC;
+  Dxx_res[19] = flagx;
+  Dxx_res[20] = Dxx_res[12] = read_num;
+  Dxx_res[13] = filament_flag_NFC;
+  memcpy(Dxx_res + 21, &meters, sizeof(meters));
+  bambu_send((bambu_data_t*)Dxx_res);
+  packge_num = (packge_num + 1) % 8;
+}
+
+unsigned char NFC_detect_res[] = {0x3D, 0xC0, 0x0D, 0x6F, 0x07, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0xFC, 0xE8};
+void on_NFC_detect(bambu_data_ex_t *data) {
+  uint8_t *buf = (uint8_t*)data;
+  NFC_detect_res[6] = buf[6];
+  NFC_detect_res[7] = buf[7];
+  bambu_send((bambu_data_t*)NFC_detect_res);
+}
+
+
+unsigned char X05_AP2_res_03[] = {0x3D, 0x00, 0x6A, 0x00, 0x48, 0x00, 0xC0, 0x00,
+                                  0x09, 0x00, 0x12, 0x03, 0x01,
+                                  92, 07, 00, 00,                                             // 我们伪装(AMS Lite)的版本: 00.00.07.92
+                                        0x41, 0x4D, 0x53, 0x5F, 0x46, 0x31, 0x30,
+                                  0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xBD, 0x44};
+unsigned char X05_AP2_res_02[] = {0x3D, 0x00, 0xB3, 0x00, 0x51, 0x00, 0x28, 0x00,
+                                  0x09, 0x00, 0x12, 0x02, 0x04, 0x0F,
+  0x30, 0x33, 0x43, 0x31, 0x32, 0x41, 0x33, 0x43, 0x30, 0x34, 0x30, 0x30, 0x35, 0x32, 0x39,   // 我们伪装(AMS Lite)的序列号: 03C12A3C0400529
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                  0x00, 0x9B, 0x31, 0x33, 0x34, 0x36, 0x35, 0x02,
+                                  0x00, 0x37, 0x39, 0x33, 0x38, 0xFF, 0xFF, 0xFF,
+                                  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                  0xFF, 0xBB, 0x44, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                  0xFF, 0x00, 0xDE, 0xEF};
+void on_get_version(const bambu_data_t *data) {
+  if (data->body_00.data[3] == 0x02) {
+    // 硬件序列号
+    X05_AP2_res_02[2] = data->body_00.temp2;
+    bambu_send((bambu_data_t*)X05_AP2_res_02);
+  } else if (data->body_00.data[3] == 0x03) {
+    // 固件版本
+    X05_AP2_res_03[2] = data->body_00.temp2;
+    bambu_send((bambu_data_t*)X05_AP2_res_03);
+  }
+}
+
+unsigned char X05_MC_res[] = {0x3D, 0x00, 0x00, 0x00, 0x15,
+                              0x00, 0xF4, 0x00, 0x03, 0x00, 0x12, 0x1A, 0x02,
+                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x57};
+void send_for_X05_MC() {
+    bambu_send((bambu_data_t*)X05_MC_res);
+}
+
+unsigned char REQx6_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x06,
+                             0x00, 0x00, 0x00, 0x00,
+                             0x04, 0x04, 0x04, 0xFF, // flags
+                             0x00, 0x00, 0x00, 0x00,
+                             C_test 0x00, 0x00, 0x00, 0x00,
+                             0x64, 0x64, 0x64, 0x64,
+                             0x90, 0xE4};
+
+/*
+void send_for_REQx6(unsigned char *buf) {
+    unsigned char filament_flag_on = 0x00;
+    unsigned char filament_flag_NFC = 0x00;
+    for (int i = 0; i < 4; i++)
+    {
+        filaments[i].meters;
+        if (filament[i].statu == online)
+        {
+            filament_flag_on |= 1 << i;
+        }
+        else if (filament[i].statu == NFC_waiting)
+        {
+            filament_flag_on |= 1 << i;
+            filament_flag_NFC |= 1 << i;
+        }
+    }
+    REQx6_res[1] = 0xC0 | (packge_num << 3);
+    res_for_06_num = buf[7];
+    REQx6_res[9] = filament_flag_on;
+    REQx6_res[10] = filament_flag_on - filament_flag_NFC;
+    REQx6_res[11] = filament_flag_on - filament_flag_NFC;
+    Dxx_res2[12] = res_for_06_num;
+    Dxx_res2[12] = res_for_06_num;
+    packge_send_with_crc(REQx6_res, sizeof(REQx6_res));
+    need_res_for_06 = true;
+    packge_num = (packge_num + 1) % 8;
+}
+*/
+
+void on_online_detection(const bambu_data_t *data) {
+  if (data->body_80.data[0] == 0x01 && data->body_80.data[1] == 0x00) {
+    uint8_t restuls[0x1d]{0x3d, 0xc0, 0x1d, 0xb4, 0x05, 0x01, 0x00};
+    bambu_send((bambu_data_t*)restuls);
+  }
+}
+
+void print_bambu_data(const char *fmt, const bambu_data_t *data) {
+  String hex;
+  for(int i = 0; i < data->body_80.size; i++) {
+    uint8_t c2 = ((uint8_t*)data)[i];
+    uint8_t c1 = c2 >> 4;
+    c2 = c2 & 0x0f;
+    hex += String(c1, HEX);
+    hex += String(c2, HEX);
+  }
+  Serial.printf(fmt, hex.c_str());
+}
 
 void loop() {
+  static int count = 0;
   if (Serial.available()) {
     String s = Serial.readString();
     s.replace("\n", "");
     ws.printfAll("{\"message\": \"%s\"}", s.c_str());
   }
   static uint8_t buffer[256];
-  static uint8_t buffer2[256];
   static size_t end = 0;
   if (RS485.available()) {
     end = RS485.readBytes(buffer + end, 256 - end) + end;
@@ -612,10 +973,12 @@ void loop() {
     }
     bambu_data_t *bambu_data = (bambu_data_t*)buffer;
     if (end >= 5) {
-      if (bambu_data->type & 0x80) {
+      if (bambu_data->type == 0xc5) {
         if (end >= bambu_data->body_80.size) {
           // 0x20 是心跳信号，可以忽略啦
-          if (bambu_data->body_80.cmd != 0x20) {
+          if (bambu_data->body_80.cmd != 0x20 && count > 32) {
+            // 频繁打印web传输不过来
+            count = 0;
             String string_to_hex;
             for(int i = 0; i < bambu_data->body_80.size; i++) {
               uint8_t c2 = ((uint8_t*)bambu_data)[i];
@@ -626,51 +989,33 @@ void loop() {
             }
             ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
           }
-          memcpy(buffer2, buffer, bambu_data->body_80.size);
-          bambu_data = (bambu_data_t*)buffer2;
+          if (bambu_data->body_80.cmd == 0x05) {
+            on_online_detection(bambu_data);
+          }
+          // 打印机询问我们状态
+          if (bambu_data->body_80.cmd == 0x04) {
+            on_get_status(bambu_data);
+          }
+          // 打印机告诉我们耗材类型
+          bambu_data_ex_t *bambu_data_ex = (bambu_data_ex_t*)bambu_data;
+          if (bambu_data->body_80.cmd == 0x08) {
+            print_bambu_data("打印机告诉我们耗材类型: %s\n", bambu_data);
+            on_set_filament(bambu_data_ex);
+          }
+          if (bambu_data_ex->body_80.cmd == 0x07) {
+            Serial.println("NFC detect");
+            // on_NFC_detect(bambu_data_ex);
+          }
+          if (bambu_data_ex->body_80.cmd == 0x03) {
+            on_get_meters(bambu_data_ex);
+          }
+          if (bambu_data_ex->body_80.cmd == 0x06) {
+            Serial.println("cmd 0x06");
+          }
           end = end - bambu_data->body_80.size;
           memcpy(buffer, buffer + bambu_data->body_80.size, end);
-          if (bambu_data->type == 0xc5 && bambu_data->body_80.cmd == 0x05 && bambu_data->body_80.data[0] == 0x01 && bambu_data->body_80.data[1] == 0x00) {
-            bambu_data->type = 0xc0;
-            bambu_data->body_80.size = 0x1d;
-            crc8.restart();
-            crc8.add((uint8_t*)bambu_data, 3);
-            bambu_data->body_80.rv = crc8.calc();
-            crc16.restart();
-            crc16.add((uint8_t*)bambu_data, bambu_data->body_80.size - 2);
-            int num = crc16.calc();
-            int size = bambu_data->body_80.size;
-            ((uint8_t*)bambu_data)[size - 2] = num & 0xFF;
-            ((uint8_t*)bambu_data)[size - 1] = num >> 8;
-            
-            // delayMicroseconds(100);
-            RS485.write((uint8_t*)bambu_data, size);
-            /*
-            crc16.restart();
-            int size = 0x1D;
-            crc16.add((uint8_t*)F10_res, size - 2);
-            int num = crc16.calc();
-            ((uint8_t*)F10_res)[size - 2] = num & 0xFF;
-            ((uint8_t*)F10_res)[size - 1] = num >> 8;
-            Serial1.write((uint8_t*)F10_res, size);
-            // Serial1.write((uint8_t*)bambu_data, size);
-            // Serial1.flush(true);
-            */
-
-            String string_to_hex;
-            for(int i = 0; i < bambu_data->body_80.size; i++) {
-            // for(int i = 0; i < ((bambu_data_t*)F10_res)->body_80.size; i++) {
-              uint8_t c2 = ((uint8_t*)bambu_data)[i];
-              // uint8_t c2 = ((uint8_t*)F10_res)[i];
-              uint8_t c1 = c2 >> 4;
-              c2 = c2 & 0x0f;
-              string_to_hex += String(c1, HEX);
-              string_to_hex += String(c2, HEX);
-            }
-            ws.printfAll("{\"ams\": \"=> %s\"}", string_to_hex.c_str());
-          }
         }
-      } else {
+      } else if (bambu_data->type == 0x05) {
         if (end >= bambu_data->body_00.size) {
           String string_to_hex;
           for(int i = 0; i < bambu_data->body_00.size; i++) {
@@ -681,13 +1026,24 @@ void loop() {
             string_to_hex += String(c2, HEX);
           }
           if (bambu_data->body_00.data[0] == 0x12) {
-            ws.printfAll("{\"ams\": \"!!! %s\"}", string_to_hex.c_str());
+            ws.printfAll("{\"ams\": \"<= %s\"}", string_to_hex.c_str());
+            if (bambu_data->body_00.data[2] == 0x09) {
+              on_get_version(bambu_data);
+            } else if (bambu_data->body_00.data[2] == 0x06) {
+              Serial.println("打印机询问我们耗材类型");
+              on_get_filament(bambu_data);
+            } else if (bambu_data->body_00.data[2] == 0x03) {
+              // Serial.println("我不知道这是什么");
+              // send_for_X05_MC();
+            }
           } else {
             ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
           }
           end = end - bambu_data->body_00.size;
           memcpy(buffer, buffer + bambu_data->body_00.size, end);
         }
+      } else {
+        // Serial.printf("来自打印机的未知命令: %d\n", bambu_data->type);
       }
     }
   }
