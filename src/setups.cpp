@@ -1,16 +1,26 @@
  
-#include <WiFi.h>
 #include "setups.h"
+#include <LittleFS.h>
 
 void time_setup() {
   // 获取时间
-  configTime(28800, 0, "pool.ntp.org");
-  while (!time(nullptr)) {
-    delay(1000);
-    Serial.println("Waiting for time sync...");
-  }
-  Serial.print("Time synced successfully, ");
+  configTime(8 * 60 * 60, 0, "pool.ntp.org");
   struct tm now;
-  getLocalTime(&now);
-  Serial.println(&now);
+  if (getLocalTime(&now)) {
+    Serial.print("Time synced successfully, ");
+    Serial.println(&now);
+  } else {
+    Serial.println("Time synced failure!");
+  }
+}
+
+void little_fs_setup() {
+  // https://randomnerdtutorials.com/esp32-write-data-littlefs-arduino/
+  //  You only need to format LittleFS the first time you run a
+  //  test or else use the LITTLEFS plugin to create a partition
+  //  https://github.com/lorol/arduino-esp32littlefs-plugin
+  #define FORMAT_LITTLEFS_IF_FAILED true
+  if(!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)){
+    Serial.println("LittleFS Mount Failed");
+  }
 }

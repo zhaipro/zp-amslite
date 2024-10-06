@@ -1,7 +1,5 @@
 
-#ifndef __SETUPS_H__
-#define __SETUPS_H__
+#pragma once
 
 void time_setup();
-
-#endif
+void little_fs_setup();

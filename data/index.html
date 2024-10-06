@@ -142,6 +142,7 @@
 <button onmouseup=fetch('/restart')>重启</button> <br>
 <button onmouseup=get_local_ip()>获取 ip</button> <br>
 跳转到：<a id="local_ip"></a> <br>
+<a href="/update" target="_blank">上传固件</a>
 </div>
 
 <div style="float:left;">
@@ -232,6 +233,7 @@
   }
 </script>
   <script>
+    // 工具提示框
     // https://bootstrapdoc.com/docs/5.0/components/tooltips
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle=tooltip]'))
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {

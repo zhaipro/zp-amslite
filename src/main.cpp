@@ -4,6 +4,8 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Wire.h>
 #include <LittleFS.h>
@@ -11,6 +13,8 @@
 #include <arduino_base64.hpp>
 #include <CRC16.h>
 #include <CRC8.h>
+#include <ESPmDNS.h>
+#include <ElegantOTA.h>
 
 #include "setups.h"
 
@@ -92,7 +96,7 @@ public:
   template <typename T>
   T get(const char* key, T default_value) {
     if (m_data[key].is<T>()) {
-      return m_data["bambu_topic_publish"].as<T>();
+      return m_data[key].as<T>();
     } else {
       return default_value;
     }
@@ -212,7 +216,7 @@ void get_config(AsyncWebServerRequest *request) {
 }
 
 void put_config(AsyncWebServerRequest *request) {
-  AsyncWebParameter* param = nullptr;
+  const AsyncWebParameter* param = nullptr;
   param = request->getParam("WiFi_ssid");
   if (param) {
     s_config.m_data["WiFi_ssid"] = param->value();
@@ -507,6 +511,7 @@ void wifi_server_setup() {
   server.on("/get_local_ip", get_local_ip);
   server.on("/restart", restart);
   server.addHandler(&ws);
+  ElegantOTA.begin(&server);    // Start ElegantOTA
   server.serveStatic("/", LittleFS, "/");
   server.begin();
   Serial.println("HTTP server started");
@@ -516,11 +521,13 @@ CRC16 crc16(0x1021, 0x913D, 0, false, false);
 CRC8 crc8(0x39, 0x66, 0, false, false);
 
 #define RS485 Serial1
+#define RS485_RX_PIN  16
+#define RS485_TX_PIN  17
 #define RS485_RTS_PIN 4
 
 void setup() {
   Serial.begin(115200);
-  RS485.begin(1228800, SERIAL_8E1, 16, 17);
+  RS485.begin(1228800, SERIAL_8E1, RS485_RX_PIN, RS485_TX_PIN);
   if (!RS485.setPins(-1, -1, -1, RS485_RTS_PIN)) {
     Serial.print("Failed to set RS485 pins");
   }
@@ -533,16 +540,17 @@ void setup() {
     Serial.print("Failed to set RS485 mode");
   }
   // Serial.println(String(ESP.getEfuseMac(), HEX).c_str());
-  // https://randomnerdtutorials.com/esp32-write-data-littlefs-arduino/
-  //  You only need to format LittleFS the first time you run a
-  //  test or else use the LITTLEFS plugin to create a partition 
-  //  https://github.com/lorol/arduino-esp32littlefs-plugin
-  #define FORMAT_LITTLEFS_IF_FAILED true
-  if(!LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED)){
-    Serial.println("LittleFS Mount Failed");
-  }
+  little_fs_setup();
   s_config.setup();
   wifi_setup();
+  time_setup();
+  // Make it possible to access webserver at http://zhaipro-amslite.local
+  const char *hostname = "zhaipro-amslite";
+  if (!MDNS.begin(hostname)) {
+    Serial.println("Error setting up mDNS responder!");
+  } else {
+    Serial.printf("Access at http://%s.local\n", hostname);
+  }
 #ifndef __DEBUG__
   bambu_setup();
 #endif
@@ -645,6 +653,28 @@ void bambu_send(bambu_data_t *data) {
   ((uint8_t*)data)[size - 2] = rv & 0xFF;
   ((uint8_t*)data)[size - 1] = rv >> 8;
   RS485.write((uint8_t*)data, size);
+}
+
+bool bambu_check(const bambu_data_t *data) {
+  size_t size;
+  crc8.restart();
+  if (data->type & 0x80) {
+    crc8.add((uint8_t*)data, 3);
+    if (data->body_80.rv != crc8.calc()) {
+      return false;
+    }
+    size = data->body_80.size;
+  } else {
+    crc8.add((uint8_t*)data, 6);
+    if (data->body_00.rv != crc8.calc()) {
+      return false;
+    }
+    size = data->body_00.size;
+  }
+  crc16.restart();
+  crc16.add((uint8_t*)data, size - 2);
+  int rv = crc16.calc();
+  return ((uint8_t*)data)[size - 2] == (rv & 0xFF) && ((uint8_t*)data)[size - 1] == (rv >> 8);
 }
 
 typedef struct {
@@ -949,6 +979,7 @@ void print_bambu_data(const char *fmt, const bambu_data_t *data) {
 }
 
 void loop() {
+  ElegantOTA.loop();
   static int count = 0;
   if (Serial.available()) {
     String s = Serial.readString();
