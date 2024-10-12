@@ -142,7 +142,30 @@
 <button onmouseup=fetch('/restart')>重启</button> <br>
 <button onmouseup=get_local_ip()>获取 ip</button> <br>
 跳转到：<a id="local_ip"></a> <br>
-<a href="/update" target="_blank">上传固件</a>
+<a href="/update" target="_blank">上传固件</a> <br>
+-------------------------------------------------- <br>
+<form action="/amslite_status" target="stop" method="post">
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="online" id="flexCheckDefault" name="A1">
+    <label class="form-check-label" for="flexCheckDefault">A1</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="online" id="flexCheckDefault"  name="A4">
+    <label class="form-check-label" for="flexCheckDefault">A4</label>
+  </div>
+  <br>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="online" id="flexCheckDefault" name="A2">
+    <label class="form-check-label" for="flexCheckDefault">A2</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" value="online" id="flexCheckDefault" name="A3">
+    <label class="form-check-label" for="flexCheckDefault">A3</label>
+  </div>
+  <br>
+  <input type="submit" value="提交配置"> <br>
+</form>
+
 </div>
 
 <div style="float:left;">

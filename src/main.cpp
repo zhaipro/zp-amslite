@@ -528,6 +528,30 @@ void bambu_setup() {
   bambu_client.setBufferSize(4096);   // 其默认值 256 太小啦
 }
 
+uint8_t s_filament_online_status = 0;
+
+void on_post_amslite_status(AsyncWebServerRequest* request) {
+  const AsyncWebParameter* param = nullptr;
+  s_filament_online_status = 0;
+  param = request->getParam("A1", true);
+  if (param && param->value() == "online") {
+    s_filament_online_status |= 1;
+  }
+  param = request->getParam("A2", true);
+  if (param && param->value() == "online") {
+    s_filament_online_status |= 2;
+  }
+  param = request->getParam("A3", true);
+  if (param && param->value() == "online") {
+    s_filament_online_status |= 4;
+  }
+  param = request->getParam("A4", true);
+  if (param && param->value() == "online") {
+    s_filament_online_status |= 8;
+  }
+  request->send(200);
+}
+
 void wifi_server_setup() {
   server.rewrite("/", "/index.html");
   server.on("/unload", unload);
@@ -541,6 +565,7 @@ void wifi_server_setup() {
   server.on("/get_config", get_config);
   server.on("/get_local_ip", get_local_ip);
   server.on("/restart", restart);
+  server.on("/amslite_status", HTTP_POST, on_post_amslite_status);
   server.addHandler(&ws);
   ElegantOTA.begin(&server);    // Start ElegantOTA
   server.serveStatic("/", LittleFS, "/");
@@ -801,7 +826,7 @@ unsigned char Dxx_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x04,
                            0x90, 0xE4};
 uint8_t packge_num = 0;
 
-
+const float EXTRUDER_GEAR_DIAMETER = 7.41;
 
 int now_filament_num = -1;
 int now_fliment_motion_flag = -1;
@@ -821,15 +846,13 @@ void on_get_meters(const bambu_data_ex_t *data) {
       now_fliment_motion_flag = fliment_motion_flag;
       Serial.printf("on_get_meters fliment: %d, motion_flag: %x meters: %f\n", read_num, fliment_motion_flag, filaments_ex[read_num].meters);
     }
-    int now_time =  millis();
     if (read_num != now_filament_num) {
       now_filament_num = read_num;
       as5600.resetCumulativePosition();
       filaments_ex[read_num].meters = 0;
     }
-    const float diameter = 7.41;
     if (fliment_motion_flag == 0x3f) {        // 请求退料
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * diameter / (1 << 10);
+      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
       if (read_num == 0) {
         ams_lite1.backward(1);
       }
@@ -838,15 +861,14 @@ void on_get_meters(const bambu_data_ex_t *data) {
         ams_lite1.forward(1);
       }
     } else {
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * diameter / (1 << 10);
+      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
       if (read_num == 0) {
         ams_lite1.stop();
       }
     }
     meters = filaments_ex[read_num].meters;
   }
-  uint8_t flagx = 0x02;
-  Cxx_res[7] = flagx;
+  Cxx_res[7] = 0x02;
   Cxx_res[8] = read_num;
   memcpy(Cxx_res + 9, &meters, sizeof(meters));
 
@@ -854,34 +876,29 @@ void on_get_meters(const bambu_data_ex_t *data) {
   packge_num = (packge_num + 1) % 8;
 }
 
+typedef struct {
+  uint8_t filament_online_status;
+} AMSLite_status_t;
 
 void on_get_status(const bambu_data_t *data) {
-  unsigned char filament_flag_on = 0x00;
-  unsigned char filament_flag_NFC = 0x00;
   unsigned char fliment_motion_flag = data->body_80.data[2];
   unsigned char read_num = data->body_80.data[4];
   float meters = -1;
-  uint8_t flagx=0x02;
-
-  filament_flag_on = 0x0f;  // 四个都在线
 
   if (read_num < 4) {
     filaments_ex[read_num].motion_set = fliment_motion_flag;
     now_filament_num = read_num;
     if (read_num != now_filament_num || now_fliment_motion_flag != fliment_motion_flag) {
       now_fliment_motion_flag = fliment_motion_flag;
-
       Serial.printf("on_get_status fliment: %d, motion_flag: %x meters: %d\n", read_num, fliment_motion_flag, filaments_ex[read_num].meters);
     }
-    int now_time =  millis();
     if (read_num != now_filament_num) {
       now_filament_num = read_num;
       filaments_ex[read_num].meters = 0;
       as5600.resetCumulativePosition();
     }
-    const float diameter = 7.41;
     if (fliment_motion_flag == 0x3f) {        // 请求退料
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * diameter / (1 << 10);
+      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
       if (read_num == 0) {
         ams_lite1.backward(0);
       }
@@ -893,18 +910,19 @@ void on_get_status(const bambu_data_t *data) {
       if (read_num == 0) {
         ams_lite1.stop();
       }
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * diameter / (1 << 10);
+      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
     }
     meters = filaments_ex[read_num].meters;
   }
 
   Dxx_res[1] = 0xC0 | (packge_num << 3);
-  Dxx_res[9] = filament_flag_on;
-  Dxx_res[10] = filament_flag_on - filament_flag_NFC;
-  Dxx_res[11] = filament_flag_on - filament_flag_NFC;
-  Dxx_res[19] = flagx;
-  Dxx_res[20] = Dxx_res[12] = read_num;
-  Dxx_res[13] = filament_flag_NFC;
+  Dxx_res[9] = s_filament_online_status;
+  Dxx_res[10] = s_filament_online_status;
+  Dxx_res[11] = s_filament_online_status;
+  Dxx_res[12] = read_num;
+  Dxx_res[13] = 0;
+  Dxx_res[19] = 0x02;
+  Dxx_res[20] = read_num;
   memcpy(Dxx_res + 21, &meters, sizeof(meters));
   bambu_send((bambu_data_t*)Dxx_res);
   packge_num = (packge_num + 1) % 8;
@@ -957,6 +975,7 @@ void send_for_X05_MC() {
     bambu_send((bambu_data_t*)X05_MC_res);
 }
 
+/*
 unsigned char REQx6_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x06,
                              0x00, 0x00, 0x00, 0x00,
                              0x04, 0x04, 0x04, 0xFF, // flags
@@ -965,7 +984,6 @@ unsigned char REQx6_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x06,
                              0x64, 0x64, 0x64, 0x64,
                              0x90, 0xE4};
 
-/*
 void send_for_REQx6(unsigned char *buf) {
     unsigned char filament_flag_on = 0x00;
     unsigned char filament_flag_NFC = 0x00;
@@ -1015,18 +1033,6 @@ void print_bambu_data(const char *fmt, const bambu_data_t *data) {
 }
 
 void loop() {
-  static uint32_t lastTime = 0;
-
-  /*
-  //  set initial position
-  int pos = as5600.getCumulativePosition();
-
-  if (millis() - lastTime >= 5000) {
-    lastTime = millis();
-    Serial.println(pos);
-  }
-  */
-
   ElegantOTA.loop();
   static int count = 0;
   if (Serial.available()) {
@@ -1054,26 +1060,13 @@ void loop() {
     if (end >= 5) {
       if (bambu_data->type == 0xc5) {
         if (end >= bambu_data->body_80.size) {
-          // 0x20 是心跳信号，可以忽略啦
-          if (bambu_data->body_80.cmd != 0x20 && count > 32) {
-            // 频繁打印web传输不过来
-            count = 0;
-            String string_to_hex;
-            for(int i = 0; i < bambu_data->body_80.size; i++) {
-              uint8_t c2 = ((uint8_t*)bambu_data)[i];
-              uint8_t c1 = c2 >> 4;
-              c2 = c2 & 0x0f;
-              string_to_hex += String(c1, HEX);
-              string_to_hex += String(c2, HEX);
-            }
-            ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
-          }
-          if (bambu_data->body_80.cmd == 0x05) {
-            on_online_detection(bambu_data);
-          }
-          // 打印机询问我们状态
           if (bambu_data->body_80.cmd == 0x04) {
+            // 打印机询问我们状态
             on_get_status(bambu_data);
+          } else if (bambu_data->body_80.cmd == 0x05) {
+            on_online_detection(bambu_data);
+          } else if (bambu_data->body_80.cmd == 0x20) {
+            // 0x20 是心跳信号，忽略即可
           }
           // 打印机告诉我们耗材类型
           bambu_data_ex_t *bambu_data_ex = (bambu_data_ex_t*)bambu_data;
