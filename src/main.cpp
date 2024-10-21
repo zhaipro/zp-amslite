@@ -36,6 +36,8 @@
 #define CD74HC4067_S0_PIN 19
 #define CD74HC4067_S1_PIN 18
 
+const float EXTRUDER_GEAR_DIAMETER = 7.41;
+
 // 开启调试模式，esp32 将不会连接拓竹
 #define __DEBUG__
 
@@ -168,6 +170,8 @@ public:
   int m_servo0_init = 90;
   int m_servo1_init = 90;
   int m_servo_power = 30;
+  float m_p = 0;
+  float m_x = -1;
 
   void setup(int m0pin1, int m0pin2, int m1pin1, int m1pin2, int s0pin, int s1pin) {
     m_motor0.setup(m0pin1, m0pin2);
@@ -199,9 +203,15 @@ public:
       m_servo0.write(m_servo0_init + m_servo_power);
     }
   }
+  void _stop() {
+    m_motor0.stop();
+    m_motor1.stop();
+    m_servo0.write(m_servo0_init);
+  }
   void stop() {
     m_motor0.stop();
     m_motor1.stop();
+    // m_servo0.write(m_servo0_init);
     int power = m_servo0.read();
     if (power < m_servo0_init - 10) {
        m_servo0.write(m_servo0_init + 5);
@@ -217,9 +227,35 @@ public:
     }
     */
   }
+  void stop_ex() {
+    m_motor0.stop();
+    m_motor1.stop();
+    int power = m_servo0.read();
+    if (m_servo0_init - 10 < power && power < m_servo0_init + 10) {
+      m_servo0.write(power);
+    } else {
+      m_servo0.write(m_servo0_init);
+    }
+  }
+  void stop(float p, float x) {
+    // 在继续推/拉 x 毫米后停止
+    m_p = p;
+    m_x = x;
+  }
+  void loop() {
+    if (m_x <= 0) {
+      return;
+    }
+    float p = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
+    if (abs(p - m_p) > m_x) {
+      stop();
+      m_x = -1;
+    }
+  }
 };
 
 AMSLite ams_lite;
+AMSLite &amslite = ams_lite;
 
 double get_arg(AsyncWebServerRequest *request, const char* name, double default_value = 0.0) {
   if (request->hasParam(name)) {
@@ -348,7 +384,7 @@ void load(AsyncWebServerRequest* request) {
 }
 
 void stop(AsyncWebServerRequest* request) {
-  ams_lite.stop();
+  ams_lite._stop();
   previous_extruder = get_arg(request, "previous_extruder");
   next_extruder = get_arg(request, "next_extruder");
   request->send(200);
@@ -851,12 +887,19 @@ void amslite_setup() {
 }
 
 void on_set_filament(bambu_data_ex_t *data) {
+  // data->body_80.data.filament.index 高四位为AMS设备编号
   filaments[data->body_80.data.filament.index] = data->body_80.data.filament;
   File file = LittleFS.open("/filaments.bin", "wb");
   file.write((uint8_t*)filaments, sizeof(filaments));
   file.close();
   uint8_t restuls[0x08]{0x3D, 0xC0, 0x08, 0xB2, 0x08, 0x60};
   bambu_send((bambu_data_t*)restuls);
+}
+
+void print_now() {
+  struct tm now;
+  getLocalTime(&now);
+  Serial.print(&now);
 }
 
 #define C_test 0x00, 0x00, 0x00, 0xFF, \
@@ -877,10 +920,11 @@ unsigned char Dxx_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x04,
                            0x90, 0xE4};
 uint8_t packge_num = 0;
 
-const float EXTRUDER_GEAR_DIAMETER = 7.41;
-
 int now_extruder_id = -1;
 int now_extruder_cmd = -1;
+int last_meters = 0;
+int last_extruder_cmd = -1;
+int last_cmd_meters = 0;
 unsigned char Cxx_res[] = {0x3D, 0xE0, 0x2C, 0x1A, 0x03,
                            C_test 0x00, 0x00, 0x00, 0x00,
                            0x90, 0xE4};
@@ -890,7 +934,7 @@ void on_get_meters(const bambu_data_ex_t *data) {
   uint8_t extruder_id = data->body_80.data.extruder.id;
   uint8_t extruder_cmd = data->body_80.data.extruder.cmd;
   float meters = -1;
-  if (extruder_id < 4) {
+  if (extruder_id < 4 && amslite.m_x <= 0) {
     if (extruder_id != now_extruder_id) {
       if (extruder_id == 0) {
         digitalWrite(CD74HC4067_S0_PIN, LOW);
@@ -908,26 +952,26 @@ void on_get_meters(const bambu_data_ex_t *data) {
       as5600.resetCumulativePosition();
       filaments_ex[extruder_id].meters = 0;
     }
-    if (extruder_id != now_extruder_id || extruder_cmd != now_extruder_cmd) {
-      // Serial.printf("on_get_meters fliment: %d, motion_flag: %x meters: %f\n", extruder_id, extruder_cmd, filaments_ex[extruder_id].meters);
-    }
-    /*
-    if (extruder_id & 0x01) {
-      filaments_ex[extruder_id].meters = -as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
-    } else {
-      filaments_ex[extruder_id].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
-    }
-    */
     if (extruder_cmd == 0x3f) {        // 请求退料
+      last_extruder_cmd = extruder_cmd;
       filaments_ex[extruder_id].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
+      last_cmd_meters = filaments_ex[extruder_id].meters;
       ams_lite.backward(extruder_id);
     } else if (extruder_cmd == 0xbf) { // 请求进料
+      last_extruder_cmd = extruder_cmd;
       ams_lite.forward(extruder_id);
     } else {
       filaments_ex[extruder_id].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
-      ams_lite.stop();
+      if (last_extruder_cmd == 0x3f) {
+        amslite.stop(filaments_ex[extruder_id].meters, 60);
+      } else {
+        ams_lite.stop();
+      }
     }
-    Serial.printf("on_get_meters fliment: %d, motion_flag: %x meters: %f\n", extruder_id, extruder_cmd, filaments_ex[extruder_id].meters);
+    if (extruder_id != now_extruder_id || extruder_cmd != now_extruder_cmd || abs(last_meters - filaments_ex[extruder_id].meters) > 2.0) {
+      print_now(); Serial.printf(" on_get_meters extruder_id: %d, extruder_cmd: %x meters: %f\n", extruder_id, extruder_cmd, filaments_ex[extruder_id].meters);
+      last_meters = filaments_ex[extruder_id].meters;
+    }
     now_extruder_id = extruder_id;
     now_extruder_cmd = extruder_cmd;
     meters = filaments_ex[extruder_id].meters;
@@ -944,60 +988,49 @@ typedef struct {
   uint8_t filament_online_status;
 } AMSLite_status_t;
 
+int last_meters2 = 0;
+
 void on_get_status(const bambu_data_t *data) {
-  unsigned char fliment_motion_flag = data->body_80.data[2];
-  unsigned char read_num = data->body_80.data[4];
+  uint8_t extruder_cmd = data->body_80.data[2];
+  uint8_t extruder_id = data->body_80.data[4];
   float meters = -1;
 
-  if (read_num < 4) {
-    filaments_ex[read_num].motion_set = fliment_motion_flag;
-    now_extruder_id = read_num;
-    if (read_num != now_extruder_id || now_extruder_cmd != fliment_motion_flag) {
-      now_extruder_cmd = fliment_motion_flag;
-      Serial.printf("on_get_status fliment: %d, motion_flag: %x meters: %f\n", read_num, fliment_motion_flag, filaments_ex[read_num].meters);
+  // 不断获取我们耗材的在线情况
+  if (extruder_id < 4) {
+    filaments_ex[extruder_id].motion_set = extruder_cmd;
+    now_extruder_id = extruder_id;
+    if (extruder_id != now_extruder_id || now_extruder_cmd != extruder_cmd) {
+      now_extruder_cmd = extruder_cmd;
     }
-    if (read_num != now_extruder_id) {
-      now_extruder_id = read_num;
-      filaments_ex[read_num].meters = 0;
+    if (extruder_id != now_extruder_id) {
+      now_extruder_id = extruder_id;
+      filaments_ex[extruder_id].meters = 0;
       as5600.resetCumulativePosition();
     }
-    if (fliment_motion_flag == 0x3f) {        // 请求退料
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
-      if (read_num == 0) {
-        ams_lite.backward(0);
-      }
-    } else if (fliment_motion_flag == 0xbf) { // 请求进料
-      if (read_num == 0) {
-        ams_lite.forward(0);
-      }
+    if (extruder_cmd == 0x3f) {        // 请求退料
+      filaments_ex[extruder_id].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
+    } else if (extruder_cmd == 0xbf) { // 请求进料
     } else {
-      if (read_num == 0) {
-        ams_lite.stop();
-      }
-      filaments_ex[read_num].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
+      filaments_ex[extruder_id].meters = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
     }
-    meters = filaments_ex[read_num].meters;
+    if (extruder_id != now_extruder_id || extruder_cmd != now_extruder_cmd || abs(last_meters2 - filaments_ex[extruder_id].meters) > 2.0) {
+      print_now(); Serial.printf(" on_get_status extruder_id: %d, extruder_cmd: %x meters: %f\n", extruder_id, extruder_cmd, filaments_ex[extruder_id].meters);
+      last_meters2 = filaments_ex[extruder_id].meters;
+    }
+    meters = filaments_ex[extruder_id].meters;
   }
 
   Dxx_res[1] = 0xC0 | (packge_num << 3);
   Dxx_res[9] = s_filament_online_status;
   Dxx_res[10] = s_filament_online_status;
   Dxx_res[11] = s_filament_online_status;
-  Dxx_res[12] = read_num;
+  Dxx_res[12] = extruder_id;
   Dxx_res[13] = 0;
   Dxx_res[19] = 0x02;
-  Dxx_res[20] = read_num;
+  Dxx_res[20] = extruder_id;
   memcpy(Dxx_res + 21, &meters, sizeof(meters));
   bambu_send((bambu_data_t*)Dxx_res);
   packge_num = (packge_num + 1) % 8;
-}
-
-unsigned char NFC_detect_res[] = {0x3D, 0xC0, 0x0D, 0x6F, 0x07, 0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0xFC, 0xE8};
-void on_NFC_detect(bambu_data_ex_t *data) {
-  uint8_t *buf = (uint8_t*)data;
-  NFC_detect_res[6] = buf[6];
-  NFC_detect_res[7] = buf[7];
-  bambu_send((bambu_data_t*)NFC_detect_res);
 }
 
 unsigned char X05_AP2_res_03[] = {0x3D, 0x00, 0x6A, 0x00, 0x48, 0x00, 0xC0, 0x00,
@@ -1032,51 +1065,6 @@ void on_get_version(const bambu_data_t *data) {
   }
 }
 
-unsigned char X05_MC_res[] = {0x3D, 0x00, 0x00, 0x00, 0x15,
-                              0x00, 0xF4, 0x00, 0x03, 0x00, 0x12, 0x1A, 0x02,
-                              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x57};
-void send_for_X05_MC() {
-    bambu_send((bambu_data_t*)X05_MC_res);
-}
-
-/*
-unsigned char REQx6_res[] = {0x3D, 0xE0, 0x3C, 0x1A, 0x06,
-                             0x00, 0x00, 0x00, 0x00,
-                             0x04, 0x04, 0x04, 0xFF, // flags
-                             0x00, 0x00, 0x00, 0x00,
-                             C_test 0x00, 0x00, 0x00, 0x00,
-                             0x64, 0x64, 0x64, 0x64,
-                             0x90, 0xE4};
-
-void send_for_REQx6(unsigned char *buf) {
-    unsigned char filament_flag_on = 0x00;
-    unsigned char filament_flag_NFC = 0x00;
-    for (int i = 0; i < 4; i++)
-    {
-        filaments[i].meters;
-        if (filament[i].statu == online)
-        {
-            filament_flag_on |= 1 << i;
-        }
-        else if (filament[i].statu == NFC_waiting)
-        {
-            filament_flag_on |= 1 << i;
-            filament_flag_NFC |= 1 << i;
-        }
-    }
-    REQx6_res[1] = 0xC0 | (packge_num << 3);
-    res_for_06_num = buf[7];
-    REQx6_res[9] = filament_flag_on;
-    REQx6_res[10] = filament_flag_on - filament_flag_NFC;
-    REQx6_res[11] = filament_flag_on - filament_flag_NFC;
-    Dxx_res2[12] = res_for_06_num;
-    Dxx_res2[12] = res_for_06_num;
-    packge_send_with_crc(REQx6_res, sizeof(REQx6_res));
-    need_res_for_06 = true;
-    packge_num = (packge_num + 1) % 8;
-}
-*/
-
 void on_online_detection(const bambu_data_t *data) {
   if (data->body_80.data[0] == 0x01 && data->body_80.data[1] == 0x00) {
     uint8_t restuls[0x1d]{0x3d, 0xc0, 0x1d, 0xb4, 0x05, 0x01, 0x00};
@@ -1086,7 +1074,13 @@ void on_online_detection(const bambu_data_t *data) {
 
 void print_bambu_data(const char *fmt, const bambu_data_t *data) {
   String hex;
-  for(int i = 0; i < data->body_80.size; i++) {
+  size_t size;
+  if (data->type & 0x80) {
+    size = data->body_80.size;
+  } else {
+    size = data->body_00.size;
+  }
+  for(int i = 0; i < size; i++) {
     uint8_t c2 = ((uint8_t*)data)[i];
     uint8_t c1 = c2 >> 4;
     c2 = c2 & 0x0f;
@@ -1096,7 +1090,18 @@ void print_bambu_data(const char *fmt, const bambu_data_t *data) {
   Serial.printf(fmt, hex.c_str());
 }
 
+float last_xxx = 0;
+
 void loop() {
+  /*
+  float xxx = as5600.getCumulativePosition() * PI * EXTRUDER_GEAR_DIAMETER / (1 << 12);
+  if (abs(xxx - last_xxx) > 2.0) {
+    last_xxx = xxx;
+    Serial.printf("xxx: %f\n", xxx);
+  }
+  */
+  amslite.loop();
+
   ElegantOTA.loop();
   static int count = 0;
   if (Serial.available()) {
@@ -1124,6 +1129,7 @@ void loop() {
     if (end >= 5) {
       if (bambu_data->type == 0xc5) {
         if (end >= bambu_data->body_80.size) {
+          bambu_data_ex_t *bambu_data_ex = (bambu_data_ex_t*)bambu_data;
           if (bambu_data->body_80.cmd == 0x04) {
             // 打印机询问我们状态
             on_get_status(bambu_data);
@@ -1131,54 +1137,38 @@ void loop() {
             on_online_detection(bambu_data);
           } else if (bambu_data->body_80.cmd == 0x20) {
             // 0x20 是心跳信号，忽略即可
-          }
-          // 打印机告诉我们耗材类型
-          bambu_data_ex_t *bambu_data_ex = (bambu_data_ex_t*)bambu_data;
-          if (bambu_data->body_80.cmd == 0x08) {
+          } else if (bambu_data->body_80.cmd == 0x08) {
             print_bambu_data("打印机告诉我们耗材类型: %s\n", bambu_data);
             on_set_filament(bambu_data_ex);
-          }
-          if (bambu_data_ex->body_80.cmd == 0x07) {
+          } else if (bambu_data_ex->body_80.cmd == 0x07) {
             Serial.println("NFC detect");
-            // on_NFC_detect(bambu_data_ex);
-          }
-          if (bambu_data_ex->body_80.cmd == 0x03) {
+          } else if (bambu_data_ex->body_80.cmd == 0x03) {
             on_get_meters(bambu_data_ex);
-          }
-          if (bambu_data_ex->body_80.cmd == 0x06) {
-            Serial.println("cmd 0x06");
+          } else {
+            print_bambu_data("0x80的未知消息：%s\n", bambu_data);
           }
           end = end - bambu_data->body_80.size;
           memcpy(buffer, buffer + bambu_data->body_80.size, end);
         }
       } else if (bambu_data->type == 0x05) {
         if (end >= bambu_data->body_00.size) {
-          String string_to_hex;
-          for(int i = 0; i < bambu_data->body_00.size; i++) {
-            uint8_t c2 = ((uint8_t*)bambu_data)[i];
-            uint8_t c1 = c2 >> 4;
-            c2 = c2 & 0x0f;
-            string_to_hex += String(c1, HEX);
-            string_to_hex += String(c2, HEX);
-          }
           if (bambu_data->body_00.data[0] == 0x12) {
-            ws.printfAll("{\"ams\": \"<= %s\"}", string_to_hex.c_str());
             if (bambu_data->body_00.data[2] == 0x09) {
               on_get_version(bambu_data);
             } else if (bambu_data->body_00.data[2] == 0x06) {
               on_get_filament(bambu_data);
             } else if (bambu_data->body_00.data[2] == 0x03) {
-              // Serial.println("我不知道这是什么");
+              // print_bambu_data("0x03 这是什么: %s\n", bambu_data);
               // send_for_X05_MC();
             }
           } else {
-            ws.printfAll("{\"ams\": \"%s\"}", string_to_hex.c_str());
+            // print_bambu_data("我不知道这是什么: %s\n", bambu_data);
           }
           end = end - bambu_data->body_00.size;
           memcpy(buffer, buffer + bambu_data->body_00.size, end);
         }
       } else {
-        // Serial.printf("来自打印机的未知命令: %d\n", bambu_data->type);
+        Serial.printf("来自打印机的未知命令: %d\n", bambu_data->type);
       }
     }
   }
